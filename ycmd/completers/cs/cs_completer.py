@@ -77,8 +77,8 @@ class CsharpCompleter( Completer ):
 
 
   def SupportedFiletypes( self ):
-    """ Just csharp """
-    return [ 'cs' ]
+    """ Supports csharp, razor, and cshtml """
+    return [ 'cs', 'razor', 'cshtml' ]
 
 
   def _GetSolutionCompleter( self, request_data ):
