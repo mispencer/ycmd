@@ -45,10 +45,10 @@ SERVER_NOT_FOUND_MSG = ( 'OmniSharp server binary not found at {0}. ' +
                          '"./install.py --omnisharp-completer".' )
 INVALID_FILE_MESSAGE = 'File is invalid.'
 NO_DIAGNOSTIC_MESSAGE = 'No diagnostic for current line!'
-PATH_TO_OMNISHARP_BINARY = os.path.abspath(
-  os.path.join( os.path.dirname( __file__ ), '..', '..', '..',
-                'third_party', 'OmniSharpServer', 'OmniSharp',
-                'bin', 'Release', 'OmniSharp.exe' ) )
+PATH_TO_OMNISHARP_BINARY = os.path.join(
+  os.path.abspath( os.path.dirname( __file__ ) ),
+  '..', '..', '..', 'third_party', 'OmniSharpServer',
+  'OmniSharp', 'bin', 'Debug', 'OmniSharp.exe' )
 LOGFILE_FORMAT = 'omnisharp_{port}_{sln}_{std}_'
 
 
@@ -78,8 +78,8 @@ class CsharpCompleter( Completer ):
 
 
   def SupportedFiletypes( self ):
-    """ Just csharp """
-    return [ 'cs' ]
+    """ Supports csharp, razor, and cshtml """
+    return [ 'cs', 'razor', 'cshtml' ]
 
 
   def _GetSolutionCompleter( self, request_data ):
