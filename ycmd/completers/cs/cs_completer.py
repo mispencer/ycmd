@@ -171,6 +171,9 @@ class CsharpCompleter( Completer ):
          self._SolutionSubcommand( request_data,
                                    method = '_GoToImplementation',
                                    fallback_to_declaration = True ) ),
+      'GoToUsages'                       : ( lambda self, request_data, args:
+         self._SolutionSubcommand( request_data,
+                                   method = '_GoToUsages', ) ),
       'GetType'                          : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_GetType' ) ),
@@ -531,6 +534,31 @@ class CsharpSolutionCompleter( object ):
     return responses.BuildDetailedInfoResponse( message )
 
 
+  def _GoToUsages( self, request_data ):
+    """ Jump to usages of identifier under cursor """
+    usages = self._GetResponse( '/findusages',
+                                self._DefaultParameters( request_data ) )
+
+    if usages[ 'QuickFixes' ]:
+      if len( usages[ 'QuickFixes' ] ) == 1:
+        return responses.BuildGoToResponse(
+            usages[ 'QuickFixes' ][ 0 ][ 'FileName' ],
+            usages[ 'QuickFixes' ][ 0 ][ 'Line' ],
+            usages[ 'QuickFixes' ][ 0 ][ 'Column' ],
+            _DecodeDescription( usages[ 'QuickFixes' ][ 0 ][ 'Text' ] ) )
+      else:
+        return [ responses.BuildGoToResponse( x[ 'FileName' ],
+                                              x[ 'Line' ],
+                                              x[ 'Column' ],
+                                              _DecodeDescription( x[ 'Text' ] ) )
+                 for x in usages[ 'QuickFixes' ] ]
+    else:
+      if usages[ 'QuickFixes' ] == None:
+        raise RuntimeError( 'Can\'t jump to usage' )
+      else:
+        raise RuntimeError( 'No usages found' )
+
+
   def _DefaultParameters( self, request_data ):
     """ Some very common request parameters """
     parameters = {}
@@ -596,6 +624,10 @@ class CsharpSolutionCompleter( object ):
         else:
             self._omnisharp_port = utils.GetUnusedLocalhostPort()
     self._logger.info( u'using port {0}'.format( self._omnisharp_port ) )
+
+
+def _DecodeDescription( string ):
+    return string.decode( "string-escape" ).strip()
 
 
 def _CompleteIsFromImport( candidate ):
