@@ -60,7 +60,6 @@ class CsharpCompleter( Completer ):
     self._logger = logging.getLogger( __name__ )
     self._solution_for_file = {}
     self._completer_per_solution = {}
-    self._diagnostic_store = None
     self._max_diagnostics_to_display = user_options[
       'max_diagnostics_to_display' ]
     self._solution_state_lock = threading.Lock()
@@ -92,9 +91,12 @@ class CsharpCompleter( Completer ):
       if solution not in self._completer_per_solution:
         keep_logfiles = self.user_options[ 'server_keep_logfiles' ]
         desired_omnisharp_port = self.user_options.get( 'csharp_server_port' )
+        max_diagnostics_to_display = self.user_options[
+          'max_diagnostics_to_display' ]
         completer = CsharpSolutionCompleter( solution,
                                              keep_logfiles,
-                                             desired_omnisharp_port )
+                                             desired_omnisharp_port,
+                                             max_diagnostics_to_display )
         self._completer_per_solution[ solution ] = completer
 
     return self._completer_per_solution[ solution ]
@@ -186,6 +188,9 @@ class CsharpCompleter( Completer ):
       'GetDoc'                           : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_GetDoc' ) ),
+      'Build'                           : ( lambda self, request_data, args:
+         self._SolutionSubcommand( request_data,
+                                   method = '_Build' ) ),
       'ServerIsRunning'                  : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = 'ServerIsRunning',
@@ -224,54 +229,12 @@ class CsharpCompleter( Completer ):
     if not solutioncompleter.ServerIsHealthy():
       return
 
-    errors = solutioncompleter.CodeCheck( request_data )
-
-    diagnostics = [ self._QuickFixToDiagnostic( x ) for x in
-                    errors[ "QuickFixes" ] ]
-
-    self._diagnostic_store = DiagnosticsToDiagStructure( diagnostics )
-
-    return [ responses.BuildDiagnosticData( x ) for x in
-             diagnostics[ : self._max_diagnostics_to_display ] ]
-
-
-  def _QuickFixToDiagnostic( self, quick_fix ):
-    filename = quick_fix[ "FileName" ]
-
-    location = responses.Location( quick_fix[ "Line" ],
-                                   quick_fix[ "Column" ],
-                                   filename )
-    location_range = responses.Range( location, location )
-    return responses.Diagnostic( list(),
-                                 location,
-                                 location_range,
-                                 quick_fix[ "Text" ],
-                                 quick_fix[ "LogLevel" ].upper() )
+    return solutioncompleter.OnFileReadyToParse( request_data )
 
 
   def GetDetailedDiagnostic( self, request_data ):
-    current_line = request_data[ 'line_num' ]
-    current_column = request_data[ 'column_num' ]
-    current_file = request_data[ 'filepath' ]
-
-    if not self._diagnostic_store:
-      raise ValueError( NO_DIAGNOSTIC_MESSAGE )
-
-    diagnostics = self._diagnostic_store[ current_file ][ current_line ]
-    if not diagnostics:
-      raise ValueError( NO_DIAGNOSTIC_MESSAGE )
-
-    closest_diagnostic = None
-    distance_to_closest_diagnostic = 999
-
-    for diagnostic in diagnostics:
-      distance = abs( current_column - diagnostic.location_.column_number_ )
-      if distance < distance_to_closest_diagnostic:
-        distance_to_closest_diagnostic = distance
-        closest_diagnostic = diagnostic
-
-    return responses.BuildDisplayMessageResponse(
-      closest_diagnostic.text_ )
+    solutioncompleter = self._GetSolutionCompleter( request_data )
+    return solutioncompleter.GetDetailedDiagnostic( request_data )
 
 
   def DebugInfo( self, request_data ):
@@ -315,10 +278,12 @@ class CsharpCompleter( Completer ):
 
 
 class CsharpSolutionCompleter( object ):
-  def __init__( self, solution_path, keep_logfiles, desired_omnisharp_port ):
+  def __init__( self, solution_path, keep_logfiles, desired_omnisharp_port, max_diagnostics_to_display ):
     self._logger = logging.getLogger( __name__ )
     self._solution_path = solution_path
     self._keep_logfiles = keep_logfiles
+    self._max_diagnostics_to_display = max_diagnostics_to_display
+    self._diagnostic_store = defaultdict( lambda : defaultdict( lambda : defaultdict( list ) ) )
     self._filename_stderr = None
     self._filename_stdout = None
     self._omnisharp_port = None
@@ -327,13 +292,63 @@ class CsharpSolutionCompleter( object ):
     self._server_state_lock = threading.RLock()
 
 
-  def CodeCheck( self, request_data ):
+  def OnFileReadyToParse( self, request_data ):
     filename = request_data[ 'filepath' ]
     if not filename:
       raise ValueError( INVALID_FILE_MESSAGE )
 
-    return self._GetResponse( '/codecheck',
-                              self._DefaultParameters( request_data ) )
+    errors = self._GetResponse( '/codecheck',
+                                self._DefaultParameters( request_data ) )
+
+    diagnostics = [ self._QuickFixToDiagnostic( x ) for x in
+                    errors[ "QuickFixes" ] ]
+
+    self._SetDiagnosticsInDiagStructure( diagnostics, filename, "PARSE" )
+
+    return [ responses.BuildDiagnosticData( x ) for x in
+             self._GetDiagnosticsForWholeFileFromDiagStructure( filename )[ : self._max_diagnostics_to_display ] ]
+
+
+  def _QuickFixToDiagnostic( self, quick_fix ):
+    filename = quick_fix[ "FileName" ]
+    log_level = quick_fix[ "LogLevel" ]
+    if log_level is None:
+      log_level = "Error"
+
+    location = responses.Location( quick_fix[ "Line" ],
+                                   quick_fix[ "Column" ],
+                                   filename )
+    location_range = responses.Range( location, location )
+    return responses.Diagnostic( list(),
+                                 location,
+                                 location_range,
+                                 quick_fix[ "Text" ],
+                                 log_level.upper() )
+
+
+  def GetDetailedDiagnostic( self, request_data ):
+    current_line = request_data[ 'line_num' ]
+    current_column = request_data[ 'column_num' ]
+    current_file = request_data[ 'filepath' ]
+
+    if not self._diagnostic_store:
+      raise ValueError( NO_DIAGNOSTIC_MESSAGE )
+
+    diagnostics = self._GetDiagnosticsForLineFromDiagStructure( current_file, current_line )
+    if not diagnostics:
+      raise ValueError( NO_DIAGNOSTIC_MESSAGE )
+
+    closest_diagnostic = None
+    distance_to_closest_diagnostic = 999
+
+    for diagnostic in diagnostics:
+      distance = abs( current_column - diagnostic.location_.column_number_ )
+      if distance < distance_to_closest_diagnostic:
+        distance_to_closest_diagnostic = distance
+        closest_diagnostic = diagnostic
+
+    return responses.BuildDisplayMessageResponse(
+      closest_diagnostic.text_ )
 
 
   def _StartServer( self ):
@@ -549,6 +564,21 @@ class CsharpSolutionCompleter( object ):
         raise RuntimeError( 'No usages found' )
 
 
+  def _Build( self, request_data ):
+    filename = request_data[ 'filepath' ]
+
+    build_errors = self._GetResponse( '/build',
+                                self._DefaultParameters( request_data ) )
+
+    diagnostics = [ self._QuickFixToDiagnostic( x ) for x in
+                    build_errors[ "QuickFixes" ] ]
+
+    self._SetDiagnosticsInDiagStructure( diagnostics, filename, "BUILD" )
+
+    return [ responses.BuildDiagnosticData( x ) for x in
+             self._GetDiagnosticsForWholeFileFromDiagStructure( filename )[ : self._max_diagnostics_to_display ] ]
+
+
   def _DefaultParameters( self, request_data ):
     """ Some very common request parameters """
     parameters = {}
@@ -615,6 +645,30 @@ class CsharpSolutionCompleter( object ):
     self._logger.info( u'using port {0}'.format( self._omnisharp_port ) )
 
 
+  def _SetDiagnosticsInDiagStructure( self, diagnostics, filename, source ):
+    for key, line in self._diagnostic_store[ filename ][ source ].iteritems():
+      del line[:]
+
+    for diagnostic in diagnostics:
+        self._diagnostic_store[ filename ][ source ][ diagnostic.location_.line_number_ ].append( diagnostic )
+
+
+  def _GetDiagnosticsForLineFromDiagStructure( self, filename, line ):
+    result = []
+    for source in self._diagnostic_store[ filename ]:
+        for item in self._diagnostic_store[ filename ][ source ][ line ]:
+          result.append( item )
+    return result
+
+
+  def _GetDiagnosticsForWholeFileFromDiagStructure( self, filename ):
+    result = []
+    for source in self._diagnostic_store[ filename ]:
+      for line in self._diagnostic_store[ filename ][ source ]:
+        for item in self._diagnostic_store[ filename ][ source ][ line ]:
+          result.append( item )
+    return result
+
 def _DecodeDescription( string ):
     return string.decode( "string-escape" ).strip()
 
@@ -626,12 +680,6 @@ def _CompleteIsFromImport( candidate ):
     return False
 
 
-def DiagnosticsToDiagStructure( diagnostics ):
-  structure = defaultdict( lambda : defaultdict( list ) )
-  for diagnostic in diagnostics:
-    structure[ diagnostic.location_.filename_ ][
-      diagnostic.location_.line_number_ ].append( diagnostic )
-  return structure
 
 
 def _BuildChunks( request_data, new_buffer ):
