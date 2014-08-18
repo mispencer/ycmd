@@ -64,10 +64,6 @@ class CsharpCompleter( Completer ):
       'max_diagnostics_to_display' ]
     self._solution_state_lock = threading.Lock()
 
-    if not os.path.isfile( PATH_TO_OMNISHARP_BINARY ):
-      raise RuntimeError(
-           SERVER_NOT_FOUND_MSG.format( PATH_TO_OMNISHARP_BINARY ) )
-
 
   def Shutdown( self ):
     if ( self.user_options[ 'auto_stop_csharp_server' ] ):
@@ -191,6 +187,10 @@ class CsharpCompleter( Completer ):
       'Build'                           : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_Build' ) ),
+      'SetOmnisharpPath'                : ( lambda self, request_data, args:
+         self._SolutionSubcommand( request_data,
+                                   method = '_SetOmnisharpPath',
+                                   path = args[ 0 ]) ),
       'ServerIsRunning'                  : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = 'ServerIsRunning',
@@ -283,6 +283,7 @@ class CsharpSolutionCompleter( object ):
     self._solution_path = solution_path
     self._keep_logfiles = keep_logfiles
     self._max_diagnostics_to_display = max_diagnostics_to_display
+    self._omnisharp_path = PATH_TO_OMNISHARP_BINARY
     self._diagnostic_store = defaultdict( lambda : defaultdict( lambda : defaultdict( list ) ) )
     self._filename_stderr = None
     self._filename_stdout = None
@@ -290,6 +291,10 @@ class CsharpSolutionCompleter( object ):
     self._omnisharp_phandle = None
     self._desired_omnisharp_port = desired_omnisharp_port
     self._server_state_lock = threading.RLock()
+
+    if not os.path.isfile( self._omnisharp_path ):
+      raise RuntimeError(
+           SERVER_NOT_FOUND_MSG.format( self._omnisharp_path ) )
 
 
   def OnFileReadyToParse( self, request_data ):
@@ -366,7 +371,7 @@ class CsharpSolutionCompleter( object ):
 
       self._ChooseOmnisharpPort()
 
-      command = [ PATH_TO_OMNISHARP_BINARY,
+      command = [ self._omnisharp_path,
                   '-p',
                   str( self._omnisharp_port ),
                   '-s',
@@ -668,6 +673,15 @@ class CsharpSolutionCompleter( object ):
         for item in self._diagnostic_store[ filename ][ source ][ line ]:
           result.append( item )
     return result
+
+
+  def _SetOmnisharpPath( self, request_data, path ):
+    self._omnisharp_path = path
+
+    if not os.path.isfile( self._omnisharp_path ):
+      raise RuntimeError(
+           SERVER_NOT_FOUND_MSG.format( self._omnisharp_path ) )
+
 
 def _DecodeDescription( string ):
     return string.decode( "string-escape" ).strip()
