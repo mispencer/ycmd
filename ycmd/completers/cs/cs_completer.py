@@ -66,9 +66,6 @@ class CsharpCompleter( Completer ):
       'max_diagnostics_to_display' ]
     self._solution_state_lock = threading.Lock()
 
-    if not os.path.isfile( PATH_TO_OMNISHARP_BINARY ):
-      raise RuntimeError(
-           SERVER_NOT_FOUND_MSG.format( PATH_TO_OMNISHARP_BINARY ) )
 
 
   def Shutdown( self ):
@@ -196,6 +193,11 @@ class CsharpCompleter( Completer ):
          self._SolutionSubcommand( request_data,
                                    method = 'ServerIsReady',
                                    no_request_data = True ) ),
+      'SetOmnisharpPath'                 : ( lambda self, request_data, args:
+         self._SolutionSubcommand( request_data,
+                                   method = '_SetOmnisharpPath',
+                                   no_request_data = True,
+                                   omnisharp_path = args[ 0 ]) ),
     }
 
 
@@ -320,12 +322,17 @@ class CsharpSolutionCompleter( object ):
     self._logger = logging.getLogger( __name__ )
     self._solution_path = solution_path
     self._keep_logfiles = keep_logfiles
+    self._omnisharp_path = PATH_TO_OMNISHARP_BINARY
     self._filename_stderr = None
     self._filename_stdout = None
     self._omnisharp_port = None
     self._omnisharp_phandle = None
     self._desired_omnisharp_port = desired_omnisharp_port
     self._server_state_lock = threading.RLock()
+
+    if not os.path.isfile( self._omnisharp_path ):
+      raise RuntimeError(
+           SERVER_NOT_FOUND_MSG.format( self._omnisharp_path ) )
 
 
   def CodeCheck( self, request_data ):
@@ -352,7 +359,7 @@ class CsharpSolutionCompleter( object ):
 
       self._ChooseOmnisharpPort()
 
-      command = [ PATH_TO_OMNISHARP_BINARY,
+      command = [ self._omnisharp_path,
                   '-p',
                   str( self._omnisharp_port ),
                   '-s',
@@ -598,6 +605,14 @@ class CsharpSolutionCompleter( object ):
         else:
             self._omnisharp_port = utils.GetUnusedLocalhostPort()
     self._logger.info( u'using port {0}'.format( self._omnisharp_port ) )
+
+
+  def _SetOmnisharpPath( self, request_data, omnisharp_path ):
+    self._omnisharp_path = omnisharp_path
+
+    if not os.path.isfile( self._omnisharp_path ):
+      raise RuntimeError(
+           SERVER_NOT_FOUND_MSG.format( self._omnisharp_path ) )
 
 
 def _CompleteIsFromImport( candidate ):
