@@ -43,6 +43,7 @@ from ycmd import utils
 SERVER_NOT_FOUND_MSG = ( 'OmniSharp server binary not found at {0}. ' +
                          'Did you compile it? You can do so by running ' +
                          '"./install.py --omnisharp-completer".' )
+MAX_PENDING_REQUESTS = 3
 INVALID_FILE_MESSAGE = 'File is invalid.'
 NO_DIAGNOSTIC_MESSAGE = 'No diagnostic for current line!'
 PATH_TO_OMNISHARP_BINARY = os.path.join(
@@ -294,6 +295,7 @@ class CsharpSolutionCompleter( object ):
     self._omnisharp_phandle = None
     self._desired_omnisharp_port = desired_omnisharp_port
     self._server_state_lock = threading.RLock()
+    self._running_commands = 0
 
     if not os.path.isfile( self._omnisharp_path ):
       raise RuntimeError(
@@ -301,6 +303,9 @@ class CsharpSolutionCompleter( object ):
 
 
   def OnFileReadyToParse( self, request_data ):
+    if self._IsAtRequestCap():
+      return
+
     filename = request_data[ 'filepath' ]
     if not filename:
       raise ValueError( INVALID_FILE_MESSAGE )
@@ -452,6 +457,8 @@ class CsharpSolutionCompleter( object ):
 
   def _GetCompletions( self, request_data, completion_type ):
     """ Ask server for completions """
+    if self._IsAtRequestCap():
+      return []
     parameters = self._DefaultParameters( request_data )
     parameters[ 'WantImportableTypes' ] = completion_type
     parameters[ 'ForceSemanticCompletion' ] = completion_type
@@ -641,11 +648,21 @@ class CsharpSolutionCompleter( object ):
     return 'http://localhost:' + str( self._omnisharp_port )
 
 
+  def _IsAtRequestCap ( self ):
+    return self._running_commands >= MAX_PENDING_REQUESTS
+
+
   def _GetResponse( self, handler, parameters = {}, timeout = None ):
     """ Handle communication with server """
-    target = urljoin( self._ServerLocation(), handler )
-    response = requests.post( target, data = parameters, timeout = timeout )
-    return response.json()
+    if self._IsAtRequestCap():
+      raise RuntimeError( "Too many commands running, try again later" )
+    self._running_commands += 1
+    try:
+      target = urljoin( self._ServerLocation(), handler )
+      response = requests.post( target, data = parameters, timeout = timeout )
+      return response.json()
+    finally:
+      self._running_commands -= 1
 
 
   def _ChooseOmnisharpPort( self ):
