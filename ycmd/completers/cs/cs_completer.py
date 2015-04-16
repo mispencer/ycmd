@@ -588,7 +588,7 @@ class CsharpSolutionCompleter( object ):
     self._SetDiagnosticsInDiagStructure( diagnostics, filename, "BUILD" )
 
     return [ responses.BuildDiagnosticData( x ) for x in
-             self._GetDiagnosticsForWholeFileFromDiagStructure( filename )[ : self._max_diagnostics_to_display ] ]
+             self._GetDiagnosticsForAllFilesFromDiagStructure( "BUILD" ) ]
 
 
   def _DefaultParameters( self, request_data ):
@@ -686,6 +686,15 @@ class CsharpSolutionCompleter( object ):
   def _GetDiagnosticsForWholeFileFromDiagStructure( self, filename ):
     result = []
     for source in self._diagnostic_store[ filename ]:
+      for line in self._diagnostic_store[ filename ][ source ]:
+        for item in self._diagnostic_store[ filename ][ source ][ line ]:
+          result.append( item )
+    return result
+
+
+  def _GetDiagnosticsForAllFilesFromDiagStructure( self, source ):
+    result = []
+    for filename in self._diagnostic_store:
       for line in self._diagnostic_store[ filename ][ source ]:
         for item in self._diagnostic_store[ filename ][ source ][ line ]:
           result.append( item )
