@@ -614,15 +614,13 @@ class CsharpSolutionCompleter( object ):
 
 
   def _Build( self, request_data ):
-    filename = request_data[ 'filepath' ]
-
     build_errors = self._GetResponse( '/build',
                                 self._DefaultParameters( request_data ) )
 
     diagnostics = [ self._QuickFixToDiagnostic( x ) for x in
                     build_errors[ "QuickFixes" ] ]
 
-    self._SetDiagnosticsInDiagStructure( diagnostics, filename, "BUILD" )
+    self._SetAllFileDiagnosticsInDiagStructure( diagnostics, "BUILD" )
 
     return [ responses.BuildDiagnosticData( x ) for x in
              self._GetDiagnosticsForAllFilesFromDiagStructure( "BUILD" ) ]
@@ -711,6 +709,14 @@ class CsharpSolutionCompleter( object ):
 
     for diagnostic in diagnostics:
         self._diagnostic_store[ filename ][ source ][ diagnostic.location_.line_number_ ].append( diagnostic )
+
+  def _SetAllFileDiagnosticsInDiagStructure( self, diagnostics, source ):
+    for filename in self._diagnostic_store:
+      for key, line in self._diagnostic_store[ filename ][ source ].iteritems():
+        del line[:]
+
+    for diagnostic in diagnostics:
+      self._diagnostic_store[ diagnostic.location_.filename_ ][ source ][ diagnostic.location_.line_number_ ].append( diagnostic )
 
 
   def _GetDiagnosticsForLineFromDiagStructure( self, filename, line ):
