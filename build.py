@@ -48,6 +48,10 @@ def OnWindows():
   return platform.system() == 'Windows'
 
 
+def OnCygwin():
+  return platform.system().startswith("CYGWIN")
+
+
 def OnTravisOrAppVeyor():
   return 'CI' in os.environ
 
@@ -230,6 +234,8 @@ def ParseArguments():
                        'from llvm.org. NOT RECOMMENDED OR SUPPORTED!' )
   parser.add_argument( '--omnisharp-completer', action = 'store_true',
                        help = 'Build C# semantic completion engine.' )
+  parser.add_argument( '--roslyn-omnisharp-completer', action = 'store_true',
+                       help = 'Build C# semantic completion engine (roslyn version).' )
   parser.add_argument( '--gocode-completer', action = 'store_true',
                        help = 'Build Go semantic completion engine.' )
   parser.add_argument( '--racer-completer', action = 'store_true',
@@ -348,7 +354,7 @@ def BuildYcmdLib( args ):
     rmtree( build_dir, ignore_errors = OnTravisOrAppVeyor() )
 
 
-def BuildOmniSharp():
+def BuildLegacyOmniSharp():
   build_command = PathToFirstExistingExecutable(
     [ 'msbuild', 'msbuild.exe', 'xbuild' ] )
   if not build_command:
@@ -356,6 +362,12 @@ def BuildOmniSharp():
 
   os.chdir( p.join( DIR_OF_THIS_SCRIPT, 'third_party', 'OmniSharpServer' ) )
   subprocess.check_call( [ build_command, '/property:Configuration=Release' ] )
+
+
+def BuildRoslynOmniSharp():
+  build_exe = "build.cmd" if OnWindows() or OnCygwin() else "build.sh"
+  build_command = p.join( DIR_OF_THIRD_PARTY, "omnisharp-roslyn", build_exe )
+  subprocess.check_call( [ build_command ] )
 
 
 def BuildGoCode():
@@ -439,7 +451,9 @@ def Main():
   ExitIfYcmdLibInUseOnWindows()
   BuildYcmdLib( args )
   if args.omnisharp_completer or args.all_completers:
-    BuildOmniSharp()
+    BuildLegacyOmniSharp()
+  if args.roslyn_omnisharp_completer or args.all_completers:
+    BuildRoslynOmniSharp()
   if args.gocode_completer or args.all_completers:
     BuildGoCode()
   if args.tern_completer or args.all_completers:
