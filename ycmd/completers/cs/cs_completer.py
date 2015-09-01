@@ -578,7 +578,7 @@ class CsharpSolutionCompleter( object ):
       return False
 
     try:
-      return self._GetResponse( '/checkalivestatus', timeout = .2 )
+      return self._GetResponse( '/checkalivestatus', timeout = 3 )
     except Exception:
       return False
 
