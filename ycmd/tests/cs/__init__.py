@@ -27,12 +27,14 @@ from contextlib import contextmanager
 import functools
 import os
 import time
+from inspect import getargspec
 
 from ycmd import handlers
 from ycmd.tests.test_utils import BuildRequest, SetUpApp
 
-shared_app = None
-shared_filepaths = []
+shared_legacy_app = None
+shared_roslyn_app = None
+shared_app_filepaths = {}
 
 
 def PathToTestFile( *args ):
@@ -57,7 +59,7 @@ def StopOmniSharpServer( app, filepath ):
 
 
 def WaitUntilOmniSharpServerReady( app, filepath ):
-  retries = 100
+  retries = 200
   success = False
 
   while retries > 0:
@@ -84,32 +86,56 @@ def setUpPackage():
   by all tests using the SharedYcmd decorator in this package. Additional
   configuration that is common to these tests, like starting a semantic
   subserver, should be done here."""
-  global shared_app
+  global shared_legacy_app, shared_roslyn_app
 
-  shared_app = SetUpApp()
-  shared_app.post_json(
+  shared_legacy_app = SetUpApp()
+  shared_legacy_app.post_json(
     '/ignore_extra_conf_file',
     { 'filepath': PathToTestFile( '.ycm_extra_conf.py' ) } )
+  shared_app_filepaths[ shared_legacy_app ] = []
+
+  shared_roslyn_app = SetUpApp()
+  shared_roslyn_app.post_json(
+    '/ignore_extra_conf_file',
+    { 'filepath': PathToTestFile( '.ycm_extra_conf.py' ) } )
+  shared_app_filepaths[ shared_roslyn_app ] = []
 
 
 def tearDownPackage():
   """Cleans up the tests using the SharedYcmd decorator in this package. It is
   executed once after running all the tests in the package."""
-  global shared_app, shared_filepaths
+  global shared_app_filepaths
 
-  for filepath in shared_filepaths:
-    StopOmniSharpServer( shared_app, filepath )
+  for app in shared_app_filepaths:
+    for filepath in shared_app_filepaths[ app ]:
+      StopOmniSharpServer( app, filepath )
 
 
 @contextmanager
-def WrapOmniSharpServer( app, filepath ):
-  global shared_filepaths
+def WrapOmniSharpServer( app, filepath, use_roslyn ):
+  global shared_app_filepaths
 
-  if filepath not in shared_filepaths:
+  if filepath not in shared_app_filepaths[ app ]:
+    SetRoslynState( app, filepath, use_roslyn )
     StartOmniSharpServer( app, filepath )
-    shared_filepaths.append( filepath )
+    shared_app_filepaths[ app ].append( filepath )
   WaitUntilOmniSharpServerReady( app, filepath )
   yield
+
+
+def SetRoslynState( app, filepath, use_roslyn ):
+  if use_roslyn:
+    app.post_json( '/run_completer_command',
+                  BuildRequest( completer_target = 'filetype_default',
+                                command_arguments = [ 'UseRoslynOmnisharp' ],
+                                filepath = filepath,
+                                filetype = 'cs' ) )
+  else:
+    app.post_json( '/run_completer_command',
+                  BuildRequest( completer_target = 'filetype_default',
+                                command_arguments = [ 'UseLegacyOmnisharp' ],
+                                filepath = filepath,
+                                filetype = 'cs' ) )
 
 
 def SharedYcmd( test ):
@@ -117,11 +143,24 @@ def SharedYcmd( test ):
   passes the shared ycmd application as a parameter.
 
   Do NOT attach it to test generators but directly to the yielded tests."""
-  global shared_app
+  global shared_legacy_app, shared_roslyn_app
+
+  ( argspec, _, _, _ ) = getargspec( test )
+  try:
+    argindex = argspec.index( 'use_roslyn' )
+  except ValueError:
+    argindex = -1
 
   @functools.wraps( test )
   def Wrapper( *args, **kwargs ):
-    return test( shared_app, *args, **kwargs )
+    if argindex > 0:
+      use_roslyn = args[ argindex - 1 ]
+    elif 'use_roslyn' in kwargs:
+      use_roslyn = kwargs[ 'use_roslyn' ]
+    else:
+      use_roslyn = False
+    app = shared_roslyn_app if use_roslyn else shared_legacy_app
+    return test( app, *args, **kwargs )
   return Wrapper
 
 
