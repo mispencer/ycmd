@@ -48,7 +48,7 @@ NO_DIAGNOSTIC_MESSAGE = 'No diagnostic for current line!'
 PATH_TO_OMNISHARP_BINARY = os.path.join(
   os.path.abspath( os.path.dirname( __file__ ) ),
   '..', '..', '..', 'third_party', 'OmniSharpServer',
-  'OmniSharp', 'bin', 'Release', 'OmniSharp.exe' )
+  'OmniSharp', 'bin', 'Debug', 'OmniSharp.exe' )
 
 
 class CsharpCompleter( Completer ):
