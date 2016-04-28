@@ -6,7 +6,6 @@ namespace testy
 	{
 		public static void Main (string[] args)
 		{
-			int 九 = 9;
 			Console.
 		}
 	}

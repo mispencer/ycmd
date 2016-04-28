@@ -24,6 +24,7 @@ standard_library.install_aliases()
 from builtins import *  # noqa
 
 
+from nose import SkipTest
 from nose.tools import eq_
 from webtest import AppError
 from hamcrest import assert_that, has_entries, contains
@@ -59,7 +60,7 @@ def _Subcommands_GoTo_Basic_test( app, use_roslyn ):
     eq_( {
       'filepath': PathToTestFile( 'testy', 'Program.cs' ),
       'line_num': 7,
-      'column_num': 3
+      'column_num': 22 if use_roslyn else 3
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -85,7 +86,7 @@ def _Subcommands_GoTo_Unicode_test( app, use_roslyn ):
     eq_( {
       'filepath': PathToTestFile( 'testy', 'Unicode.cs' ),
       'line_num': 30,
-      'column_num': 37
+      'column_num': 54 if use_roslyn else 37
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -113,7 +114,7 @@ def _Subcommands_GoToImplementation_Basic_test( app, use_roslyn ):
     eq_( {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
       'line_num': 30,
-      'column_num': 3
+      'column_num': 15 if use_roslyn else 3
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -175,6 +176,8 @@ def _Subcommands_CsCompleter_InvalidLocation_test( app, use_roslyn ):
     except AppError as e:
       if 'Can\\\'t jump to implementation' in str(e):
         pass
+      elif 'No implementations found' in str(e):
+        pass
       else:
         raise
 
@@ -204,7 +207,7 @@ def _Subcommands_GoToImplementationElseDeclaration_NoImpl_test( app,
     eq_( {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
       'line_num': 35,
-      'column_num': 3
+      'column_num': 8 if use_roslyn else 3
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -233,7 +236,7 @@ def _Subcommands_GoToImplementationElseDeclaration_SingleImpl_test(
     eq_( {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
       'line_num': 30,
-      'column_num': 3
+      'column_num': 15 if use_roslyn else 3
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -262,11 +265,11 @@ def _Subcommands_GoToImplementationElseDeclaration_MultipleImpls_test(
     eq_( [ {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
       'line_num': 43,
-      'column_num': 3
+      'column_num': 15 if use_roslyn else 3
     }, {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
       'line_num': 48,
-      'column_num': 3
+      'column_num': 15 if use_roslyn else 3
     } ], app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -294,11 +297,11 @@ def _Subcommands_GetToImplementation_Unicode_test( app, use_roslyn ):
     eq_( [ {
       'filepath': PathToTestFile( 'testy', 'Unicode.cs' ),
       'line_num': 49,
-      'column_num': 54
+      'column_num': 66 if use_roslyn else 54
     }, {
       'filepath': PathToTestFile( 'testy', 'Unicode.cs' ),
       'line_num': 50,
-      'column_num': 50
+      'column_num': 62 if use_roslyn else 50
     } ], app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -322,7 +325,7 @@ def _Subcommands_GetType_EmptyMessage_test( app, use_roslyn ):
                                  filepath = filepath )
 
     eq_( {
-      u'message': u""
+      u'message': None if use_roslyn else u""
     }, app.post_json( '/run_completer_command', gettype_data ).json )
 
 
@@ -346,7 +349,7 @@ def _Subcommands_GetType_VariableDeclaration_test( app, use_roslyn ):
                                  filepath = filepath )
 
     eq_( {
-      u'message': u"string"
+      u'message': u"System.string" if use_roslyn else u"string"
     }, app.post_json( '/run_completer_command', gettype_data ).json )
 
 
@@ -394,7 +397,7 @@ def _Subcommands_GetType_Constant_test( app, use_roslyn ):
                                  filepath = filepath )
 
     eq_( {
-      u'message': u"System.String"
+      u'message': None if use_roslyn else u"System.String"
     }, app.post_json( '/run_completer_command', gettype_data ).json )
 
 
@@ -416,9 +419,13 @@ def _Subcommands_GetType_DocsIgnored_test( app, use_roslyn ):
                                  contents = contents,
                                  filetype = 'cs',
                                  filepath = filepath )
+    if use_roslyn:
+      message = u"int GetTypeTestCase.an_int_with_docs"
+    else:
+      message = u"int GetTypeTestCase.an_int_with_docs;"
 
     eq_( {
-      u'message': u"int GetTypeTestCase.an_int_with_docs;",
+      u'message': message,
     }, app.post_json( '/run_completer_command', gettype_data ).json )
 
 
@@ -441,9 +448,13 @@ def _Subcommands_GetDoc_Variable_test( app, use_roslyn ):
                                 filetype = 'cs',
                                 filepath = filepath )
 
+    detailed_info = ( 'int GetDocTestCase.an_int;\n'
+                      'an integer, or something' )
+    if use_roslyn:
+      detailed_info = ( 'int GetDocTestCase.an_int\n'
+                        'an integer, or something' )
     eq_( {
-      'detailed_info': 'int GetDocTestCase.an_int;\n'
-                       'an integer, or something',
+      'detailed_info': detailed_info
     }, app.post_json( '/run_completer_command', getdoc_data ).json )
 
 
@@ -465,12 +476,19 @@ def _Subcommands_GetDoc_Function_test( app, use_roslyn ):
                                 contents = contents,
                                 filetype = 'cs',
                                 filepath = filepath )
+    if use_roslyn:
+      detailed_info = ( 'int GetDocTestCase.DoATest()\n'
+                        'Very important method.\n\nWith multiple lines of '
+                        'commentary\nAnd Format-\n-ting' )
+    else:
+      # It seems that Omnisharp server eats newlines
+      detailed_info = ( 'int GetDocTestCase.DoATest();\n'
+                        ' Very important method. With multiple lines of '
+                        'commentary And Format- -ting' )
 
-    # It seems that Omnisharp server eats newlines
+
     eq_( {
-      'detailed_info': 'int GetDocTestCase.DoATest();\n'
-                       ' Very important method. With multiple lines of '
-                       'commentary And Format- -ting',
+      'detailed_info': detailed_info,
     }, app.post_json( '/run_completer_command', getdoc_data ).json )
 
 
@@ -480,6 +498,8 @@ def RunFixItTest( app,
                   column,
                   result_matcher,
                   filepath = [ 'testy', 'FixItTestCase.cs' ] ):
+  if use_roslyn:
+    raise SkipTest( "Roslyn doesn't seem to support FixIt  yet" )
   filepath = PathToTestFile( *filepath )
   with WrapOmniSharpServer( app, filepath, use_roslyn ):
     contents = ReadFile( filepath )

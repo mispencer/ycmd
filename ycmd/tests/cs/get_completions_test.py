@@ -75,9 +75,10 @@ def _GetCompletions_Unicode_test( app, use_roslyn ):
                                     line_num = 43,
                                     column_num = 26 )
     response_data = app.post_json( '/completions', completion_data ).json
+    method_completion = 'DoATest' if use_roslyn else 'DoATest()'
     assert_that( response_data[ 'completions' ],
                  has_items(
-                   CompletionEntryMatcher( 'DoATest()' ),
+                   CompletionEntryMatcher( method_completion ),
                    CompletionEntryMatcher( 'an_int' ),
                    CompletionEntryMatcher( 'a_unicøde' ),
                    CompletionEntryMatcher( 'øøø' ) ) )
@@ -97,15 +98,14 @@ def _GetCompletions_MultipleSolution_test( app, use_roslyn ):
                                 'solution-named-like-folder',
                                 'testy',
                                 'Program.cs' ) ]
-  lines = [ 10, 9 ]
-  for filepath, line in zip( filepaths, lines ):
+  for filepath in filepaths:
     with WrapOmniSharpServer( app, filepath, use_roslyn ):
       contents = ReadFile( filepath )
 
       completion_data = BuildRequest( filepath = filepath,
                                       filetype = 'cs',
                                       contents = contents,
-                                      line_num = line,
+                                      line_num = 10,
                                       column_num = 12 )
       response_data = app.post_json( '/completions',
                                      completion_data ).json

@@ -34,6 +34,7 @@ from ycmd.tests.test_utils import BuildRequest, SetUpApp
 
 shared_legacy_app = None
 shared_roslyn_app = None
+shared_app_server_state = {}
 shared_app_filepaths = {}
 
 
@@ -86,15 +87,17 @@ def setUpPackage():
   by all tests using the SharedYcmd decorator in this package. Additional
   configuration that is common to these tests, like starting a semantic
   subserver, should be done here."""
-  global shared_legacy_app, shared_roslyn_app
+  global shared_legacy_app, shared_roslyn_app, shared_app_server_state
 
   shared_legacy_app = SetUpApp()
+  shared_app_server_state[ shared_legacy_app ] = handlers._server_state
   shared_legacy_app.post_json(
     '/ignore_extra_conf_file',
     { 'filepath': PathToTestFile( '.ycm_extra_conf.py' ) } )
   shared_app_filepaths[ shared_legacy_app ] = []
 
   shared_roslyn_app = SetUpApp()
+  shared_app_server_state[ shared_roslyn_app ] = handlers._server_state
   shared_roslyn_app.post_json(
     '/ignore_extra_conf_file',
     { 'filepath': PathToTestFile( '.ycm_extra_conf.py' ) } )
@@ -107,18 +110,26 @@ def tearDownPackage():
   global shared_app_filepaths
 
   for app in shared_app_filepaths:
-    for filepath in shared_app_filepaths[ app ]:
-      StopOmniSharpServer( app, filepath )
+    old_server_state = handlers._server_state
+    try:
+      handlers._server_state = shared_app_server_state[ app ]
+      for filepath in shared_app_filepaths[ app ]:
+        StopOmniSharpServer( app, filepath )
+    finally:
+      shared_app_server_state[ app ] = handlers._server_state
+      handlers._server_state = old_server_state
 
 
 @contextmanager
 def WrapOmniSharpServer( app, filepath, use_roslyn ):
   global shared_app_filepaths
 
-  if filepath not in shared_app_filepaths[ app ]:
-    SetRoslynState( app, filepath, use_roslyn )
+  SetRoslynState( app, filepath, use_roslyn )
+  if ( app not in shared_app_filepaths
+       or filepath not in shared_app_filepaths[ app ] ):
     StartOmniSharpServer( app, filepath )
-    shared_app_filepaths[ app ].append( filepath )
+    if app in shared_app_filepaths:
+      shared_app_filepaths[ app ].append( filepath )
   WaitUntilOmniSharpServerReady( app, filepath )
   yield
 
@@ -143,24 +154,30 @@ def SharedYcmd( test ):
   passes the shared ycmd application as a parameter.
 
   Do NOT attach it to test generators but directly to the yielded tests."""
-  global shared_legacy_app, shared_roslyn_app
-
-  ( argspec, _, _, _ ) = getargspec( test )
-  try:
-    argindex = argspec.index( 'use_roslyn' )
-  except ValueError:
-    argindex = -1
 
   @functools.wraps( test )
   def Wrapper( *args, **kwargs ):
-    if argindex > 0:
+    global shared_legacy_app, shared_roslyn_app, shared_app_server_state
+
+    ( argspec, _, _, _ ) = getargspec( test )
+    try:
+      argindex = argspec.index( 'use_roslyn' )
       use_roslyn = args[ argindex - 1 ]
-    elif 'use_roslyn' in kwargs:
-      use_roslyn = kwargs[ 'use_roslyn' ]
-    else:
-      use_roslyn = False
+    except:
+      if 'use_roslyn' in kwargs:
+        use_roslyn = kwargs[ 'use_roslyn' ]
+      else:
+        use_roslyn = False
     app = shared_roslyn_app if use_roslyn else shared_legacy_app
-    return test( app, *args, **kwargs )
+
+    old_server_state = handlers._server_state
+
+    try:
+      handlers._server_state = shared_app_server_state[ app ]
+      return test( app, *args, **kwargs )
+    finally:
+      shared_app_server_state[ app ] = handlers._server_state
+      handlers._server_state = old_server_state
   return Wrapper
 
 

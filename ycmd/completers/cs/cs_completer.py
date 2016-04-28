@@ -321,6 +321,8 @@ class CsharpCompleter( Completer ):
 
 
   def _SetOmnisharpPath( self, request_data, omnisharp_path ):
+    if self._omnisharp_path == omnisharp_path:
+      return
     self._omnisharp_path = omnisharp_path
 
     if not os.path.isfile( self._omnisharp_path ):
@@ -390,9 +392,6 @@ class CsharpSolutionCompleter( object ):
 
       if not utils.OnWindows() and not utils.OnCygwin():
         command.insert( 0, 'mono' )
-
-      #if utils.OnCygwin():
-      #  command.extend( [ '--client-path-mode', 'Cygwin' ] )
 
       self._omnisharp_phandle = utils.SafePopen(
           command, stdout = PIPE, stderr = PIPE )
@@ -529,9 +528,9 @@ class CsharpSolutionCompleter( object ):
       else:
         return [ responses.BuildGoToResponseFromLocation(
                    _BuildLocation( request_data,
-                                   x[ 'FileName' ],
+                                   convert( x[ 'FileName' ] ),
                                    x[ 'Line' ],
-                                   convert( x[ 'Column' ] ) ) )
+                                   x[ 'Column' ] ) )
                  for x in implementation[ 'QuickFixes' ] ]
     else:
       if ( fallback_to_declaration ):
@@ -765,7 +764,6 @@ def _ConvertFilenameForCygwin( filename, direction ):
   try:
     return _cygpath_data[ direction ][ 'Data' ][ filename ]
   except KeyError:
-  
     cygpath = _cygpath_data[ direction ][ 'Process' ]
     if not cygpath:
       dir_arg = '-w' if direction else '-u'

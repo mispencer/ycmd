@@ -32,8 +32,8 @@ from ycmd.utils import ReadFile
 
 
 def Diagnostics_ZeroBasedLineAndColumn_test():
-  yield _Diagnostics_ZeroBasedLineAndColumn_test, True
   yield _Diagnostics_ZeroBasedLineAndColumn_test, False
+  yield _Diagnostics_ZeroBasedLineAndColumn_test, True
 
 
 @SharedYcmd
@@ -42,22 +42,20 @@ def _Diagnostics_ZeroBasedLineAndColumn_test( app, use_roslyn ):
   with WrapOmniSharpServer( app, filepath, use_roslyn ):
     contents = ReadFile( filepath )
 
-    results = {}
-    for _ in ( 0, 1 ):  # First call always returns blank for some reason
-      event_data = BuildRequest( filepath = filepath,
-                                 event_name = 'FileReadyToParse',
-                                 filetype = 'cs',
-                                 contents = contents )
+    event_data = BuildRequest( filepath = filepath,
+                                event_name = 'FileReadyToParse',
+                                filetype = 'cs',
+                                contents = contents )
 
-      results = app.post_json( '/event_notification', event_data ).json
+    results = app.post_json( '/event_notification', event_data ).json
 
     assert_that( results,
       _Diagnostics_CsCompleter_ExpectedResult( use_roslyn, True ) )
 
 
 def Diagnostics_MultipleSolution_test():
-  yield _Diagnostics_MultipleSolution_test, True
   yield _Diagnostics_MultipleSolution_test, False
+  yield _Diagnostics_MultipleSolution_test, True
 
 
 @SharedYcmd
@@ -71,14 +69,12 @@ def _Diagnostics_MultipleSolution_test( app, use_roslyn ):
     with WrapOmniSharpServer( app, filepath, use_roslyn ):
       contents = ReadFile( filepath )
 
-      results = {}
-      for _ in ( 0, 1 ):  # First call always returns blank for some reason
-        event_data = BuildRequest( filepath = filepath,
-                                   event_name = 'FileReadyToParse',
-                                   filetype = 'cs',
-                                   contents = contents )
+      event_data = BuildRequest( filepath = filepath,
+                                  event_name = 'FileReadyToParse',
+                                  filetype = 'cs',
+                                  contents = contents )
 
-        results = app.post_json( '/event_notification', event_data ).json
+      results = app.post_json( '/event_notification', event_data ).json
 
       assert_that( results,
         _Diagnostics_CsCompleter_ExpectedResult( use_roslyn, main_error ) )
