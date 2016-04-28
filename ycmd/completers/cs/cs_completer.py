@@ -57,8 +57,8 @@ if utils.OnWindows() or utils.OnCygwin():
   ROSLYN_OMNISHARP_BINARY = 'Omnisharp.cmd'
 PATH_TO_ROSLYN_OMNISHARP_BINARY = os.path.join(
   os.path.abspath( os.path.dirname( __file__ ) ),
-  '..', '..', '..', 'third_party', 'omnisharp-roslyn', 'scripts',
-  ROSLYN_OMNISHARP_BINARY
+  '..', '..', '..', 'third_party', 'omnisharp-roslyn', 'artifacts',
+  'scripts', ROSLYN_OMNISHARP_BINARY
 )
 
 
@@ -253,7 +253,7 @@ class CsharpCompleter( Completer ):
 
 
   def _QuickFixToDiagnostic( self, request_data, quick_fix ):
-    filename = quick_fix[ "FileName" ]
+    filename = _ConvertFilenameForCygwin( quick_fix[ "FileName" ], False )
     location = _BuildLocation( request_data,
                                filename,
                                quick_fix[ 'Line' ],
@@ -375,7 +375,8 @@ class CsharpSolutionCompleter( object ):
 
       self._logger.info( 'Starting OmniSharp server' )
 
-      path_to_solutionfile = self._solution_path
+      path_to_solutionfile = _ConvertFilenameForCygwin( self._solution_path,
+                                                        True )
       self._logger.info(
           u'Loading solution file {0}'.format( path_to_solutionfile ) )
 
@@ -390,8 +391,8 @@ class CsharpSolutionCompleter( object ):
       if not utils.OnWindows() and not utils.OnCygwin():
         command.insert( 0, 'mono' )
 
-      if utils.OnCygwin():
-        command.extend( [ '--client-path-mode', 'Cygwin' ] )
+      #if utils.OnCygwin():
+      #  command.extend( [ '--client-path-mode', 'Cygwin' ] )
 
       self._omnisharp_phandle = utils.SafePopen(
           command, stdout = PIPE, stderr = PIPE )
@@ -499,9 +500,10 @@ class CsharpSolutionCompleter( object ):
     definition = self._GetResponse( '/gotodefinition',
                                     self._DefaultParameters( request_data ) )
     if definition[ 'FileName' ] is not None:
+      filepath = _ConvertFilenameForCygwin( definition[ 'FileName' ], False )
       return responses.BuildGoToResponseFromLocation(
         _BuildLocation( request_data,
-                        definition[ 'FileName' ],
+                        filepath,
                         definition[ 'Line' ],
                         definition[ 'Column' ] ) )
     else:
@@ -515,11 +517,13 @@ class CsharpSolutionCompleter( object ):
         self._DefaultParameters( request_data ) )
 
     if implementation[ 'QuickFixes' ]:
+      def convert( filename ):
+        return _ConvertFilenameForCygwin( filename, False )
       if len( implementation[ 'QuickFixes' ] ) == 1:
         return responses.BuildGoToResponseFromLocation(
           _BuildLocation(
             request_data,
-            implementation[ 'QuickFixes' ][ 0 ][ 'FileName' ],
+            convert( implementation[ 'QuickFixes' ][ 0 ][ 'FileName' ] ),
             implementation[ 'QuickFixes' ][ 0 ][ 'Line' ],
             implementation[ 'QuickFixes' ][ 0 ][ 'Column' ] ) )
       else:
@@ -527,7 +531,7 @@ class CsharpSolutionCompleter( object ):
                    _BuildLocation( request_data,
                                    x[ 'FileName' ],
                                    x[ 'Line' ],
-                                   x[ 'Column' ] ) )
+                                   convert( x[ 'Column' ] ) ) )
                  for x in implementation[ 'QuickFixes' ] ]
     else:
       if ( fallback_to_declaration ):
@@ -555,9 +559,10 @@ class CsharpSolutionCompleter( object ):
     replacement_text = result[ "Text" ]
     # Note: column_num is already a byte offset so we don't need to use
     # _BuildLocation.
+    filepath = _ConvertFilenameForCygwin( request_data[ 'filepath' ], False )
     location = responses.Location( request_data[ 'line_num' ],
                                    request_data[ 'column_num' ],
-                                   request_data[ 'filepath' ] )
+                                   filepath )
     fixits = [ responses.FixIt( location,
                                 _BuildChunks( request_data,
                                               replacement_text ) ) ]
@@ -586,6 +591,7 @@ class CsharpSolutionCompleter( object ):
     filepath = request_data[ 'filepath' ]
     parameters[ 'buffer' ] = (
       request_data[ 'file_data' ][ filepath ][ 'contents' ] )
+    filepath = _ConvertFilenameForCygwin( filepath, True )
     parameters[ 'filename' ] = filepath
     return parameters
 
@@ -741,3 +747,35 @@ def _BuildLocation( request_data, filename, line_num, column_num ):
       line_num,
       CodepointOffsetToByteOffset( line_value, column_num ),
       filename )
+
+
+_cygpath_data = {
+  True: { 'Process': None, 'Data': {} },
+  False: { 'Process': None, 'Data': {} }
+}
+
+
+def _ConvertFilenameForCygwin( filename, direction ):
+  global _cygpath_data
+  if not utils.OnCygwin():
+    return filename
+
+  direction = True if direction else False
+
+  try:
+    return _cygpath_data[ direction ][ 'Data' ][ filename ]
+  except KeyError:
+  
+    cygpath = _cygpath_data[ direction ][ 'Process' ]
+    if not cygpath:
+      dir_arg = '-w' if direction else '-u'
+      command = [ 'cygpath', '-f', '-', dir_arg ]
+      cygpath = utils.SafePopen( command , stdout = PIPE, stdin = PIPE )
+      _cygpath_data[ direction ][ 'Process' ] = cygpath
+
+    cygpath.stdin.write( filename + "\n" )
+    result = cygpath.stdout.readline().rstrip()
+
+    _cygpath_data[ direction ][ 'Data' ][ filename ] = result
+
+    return result
