@@ -52,13 +52,12 @@ PATH_TO_LEGACY_OMNISHARP_BINARY = os.path.join(
   os.path.abspath( os.path.dirname( __file__ ) ),
   '..', '..', '..', 'third_party', 'OmniSharpServer',
   'OmniSharp', 'bin', 'Release', 'OmniSharp.exe' )
-ROSLYN_OMNISHARP_BINARY = 'Omnisharp'
+ROSLYN_OMNISHARP_BINARY = 'OmniSharp'
 if utils.OnWindows() or utils.OnCygwin():
-  ROSLYN_OMNISHARP_BINARY = 'Omnisharp.cmd'
+  ROSLYN_OMNISHARP_BINARY = 'Omnisharp.exe'
 PATH_TO_ROSLYN_OMNISHARP_BINARY = os.path.join(
   os.path.abspath( os.path.dirname( __file__ ) ),
-  '..', '..', '..', 'third_party', 'omnisharp-roslyn', 'artifacts',
-  'scripts', ROSLYN_OMNISHARP_BINARY
+  '..', '..', '..', 'third_party', 'omnisharp-roslyn', ROSLYN_OMNISHARP_BINARY
 )
 
 
@@ -390,8 +389,11 @@ class CsharpSolutionCompleter( object ):
                   '-s',
                   u'{0}'.format( path_to_solutionfile ) ]
 
-      if not utils.OnWindows() and not utils.OnCygwin():
+      if ( not utils.OnWindows() and not utils.OnCygwin()
+           and self._omnisharp_path.endswith( '.exe' ) ):
         command.insert( 0, 'mono' )
+
+      self._logger.info( 'Starting OmniSharp server with: ' + str( command ) )
 
       self._omnisharp_phandle = utils.SafePopen(
           command, stdout = PIPE, stderr = PIPE )

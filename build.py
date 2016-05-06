@@ -365,12 +365,70 @@ def BuildLegacyOmniSharp():
 
 
 def BuildRoslynOmniSharp():
-  build_exe = "build.cmd" if OnWindows() or OnCygwin() else "build.sh"
   build_dir = p.join( DIR_OF_THIRD_PARTY, "omnisharp-roslyn" )
   try:
+    try:
+      os.mkdir( build_dir )
+    except OSError:
+      pass
     os.chdir( build_dir )
-    build_command = p.join( ".", build_exe )
-    subprocess.check_call( [ build_command ] )
+    url_pattern = ( "https://github.com/OmniSharp/omnisharp-roslyn/"
+                    "releases/download/v1.9-alpha13/{0}" )
+    if OnWindows() or OnCygwin():
+      if platform.machine().endswith( '64' ):
+        url_file = 'omnisharp-win-x64-netcoreapp1.0.zip'
+      else:
+        url_file = 'omnisharp-win-x86-netcoreapp1.0.zip'
+    elif OnMac():
+      url_file = 'omnisharp-osx-x64-netcoreapp1.0.tar.gz'
+    else:
+      disto_package_names = {
+        'Centos': 'omnisharp-centos-x64-netcoreapp1.0.tar.gz'
+        'debian': 'omnisharp-debian-x64-netcoreapp1.0.tar.gz'
+        'rhel': 'omnisharp-rhel-x64-netcoreapp1.0.tar.gz'
+        'Ubuntu': 'omnisharp-ubuntu-x64-netcoreapp1.0.tar.gz'
+      }
+      supported_dists = disto_package_names.keys()
+      disto = platform.linux_distribution( supported_dists = supported_dists,
+                                        full_distribution_name = False )[ 0 ]
+      try:
+        url_file = disto_package_names[ disto ]
+      except KeyValue:
+        url_file = 'omnisharp-linux-x64-netcoreapp1.0.tar.gz'
+
+    if not p.exists( url_file ):
+      sys.path.insert( 1, p.abspath( p.join( DIR_OF_THIRD_PARTY,
+                                             'requests' ) ) )
+      import requests
+      result = requests.get( url_pattern.format( url_file ) )
+      with open( url_file, 'wb' ) as fh:
+        fh.write( result.content )
+
+    if OnCygwin():
+      extract_command = [ 'unzip', url_file ]
+    elif OnWindows():
+      try:
+        import _winreg
+      except ImportError:
+        import winreg as _winreg
+
+      wow64 = _winreg.KEY_READ | _winreg.KEY_WOW64_64KEY
+      with _winreg.ConnectRegistry( None, _winreg.HKEY_LOCAL_MACHINE ) as LM:
+        with _winreg.OpenKey( LM, 'SOFTWARE', 0, wow64 ) as S:
+          with _winreg.OpenKey( S, '7-Zip', 0, wow64 ) as SZ:
+            seven_zip_path = _winreg.QueryValueEx( SZ, 'Path' )[ 0 ]
+
+      extract_command = [ p.join( seven_zip_path, '7z.exe' ), 'x', url_file ]
+    else:
+      extract_command = [ 'tar', 'xfv', url_file ]
+
+    subprocess.check_call( extract_command )
+
+    if OnCygwin():
+      import glob
+      exes = glob.glob( '*.exe' )
+      dlls = glob.glob( '*.dll' )
+      subprocess.check_call( [ "chmod", "a+x" ] + exes + dlls  )
   finally:
     os.chdir( DIR_OF_THIS_SCRIPT )
 
