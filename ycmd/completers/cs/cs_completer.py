@@ -31,7 +31,8 @@ import errno
 import time
 import re
 from ycmd.completers.completer import Completer
-from ycmd.utils import ForceSemanticCompletion, CodepointOffsetToByteOffset
+from ycmd.utils import ( ForceSemanticCompletion, CodepointOffsetToByteOffset,
+                         ToUnicode )
 from ycmd import responses
 from ycmd import utils
 from ycmd.completers.completer_utils import GetFileContents
@@ -414,7 +415,7 @@ class CsharpSolutionCompleter( object ):
           new_data = os.read( stream.fileno(), 1024 * 1024 * 10 )
           if not new_data:
             time.sleep( .1 )
-          data += new_data
+          data += ToUnicode( new_data )
           while "\n" in data:
             ( line, data ) = data.split( "\n", 1 )
             self._logger.info( "Omnisharp " + type + ": " + line.rstrip() )
