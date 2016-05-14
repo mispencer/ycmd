@@ -372,8 +372,9 @@ def BuildRoslynOmniSharp():
     except OSError:
       pass
     os.chdir( build_dir )
+    version = "v1.9-alpha14"
     url_pattern = ( "https://github.com/OmniSharp/omnisharp-roslyn/"
-                    "releases/download/v1.9-alpha13/{0}" )
+                    "releases/download/{0}/{1}" )
     if OnWindows() or OnCygwin():
       if platform.machine().endswith( '64' ):
         url_file = 'omnisharp-win-x64-netcoreapp1.0.zip'
@@ -396,16 +397,22 @@ def BuildRoslynOmniSharp():
       except KeyValue:
         url_file = 'omnisharp-linux-x64-netcoreapp1.0.tar.gz'
 
-    if not p.exists( url_file ):
+    try:
+      os.mkdir( version )
+    except OSError:
+      pass
+
+    file_path = p.join( version, url_file )
+    if not p.exists( file_path ):
       sys.path.insert( 1, p.abspath( p.join( DIR_OF_THIRD_PARTY,
                                              'requests' ) ) )
       import requests
-      result = requests.get( url_pattern.format( url_file ) )
-      with open( url_file, 'wb' ) as fh:
+      result = requests.get( url_pattern.format( version, url_file ) )
+      with open( file_path, 'wb' ) as fh:
         fh.write( result.content )
 
     if OnCygwin():
-      extract_command = [ 'unzip', url_file ]
+      extract_command = [ 'unzip', file_path ]
     elif OnWindows():
       try:
         import _winreg
@@ -418,9 +425,9 @@ def BuildRoslynOmniSharp():
           with _winreg.OpenKey( S, '7-Zip', 0, wow64 ) as SZ:
             seven_zip_path = _winreg.QueryValueEx( SZ, 'Path' )[ 0 ]
 
-      extract_command = [ p.join( seven_zip_path, '7z.exe' ), 'x', url_file ]
+      extract_command = [ p.join( seven_zip_path, '7z.exe' ), 'x', file_path ]
     else:
-      extract_command = [ 'tar', 'xfv', url_file ]
+      extract_command = [ 'tar', 'xfv', file_path ]
 
     subprocess.check_call( extract_command )
 
