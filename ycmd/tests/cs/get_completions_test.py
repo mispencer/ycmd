@@ -27,6 +27,7 @@ from builtins import *  # noqa
 
 from hamcrest import ( assert_that, calling, empty, greater_than, has_item,
                        has_items, has_entries, raises )
+from nose import SkipTest
 from nose.tools import eq_
 from webtest import AppError
 
