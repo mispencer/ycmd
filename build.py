@@ -383,9 +383,9 @@ def BuildRoslynOmniSharp():
       url_file = 'omnisharp-osx-x64-netcoreapp1.0.tar.gz'
     else:
       disto_package_names = {
-        'Centos': 'omnisharp-centos-x64-netcoreapp1.0.tar.gz'
-        'debian': 'omnisharp-debian-x64-netcoreapp1.0.tar.gz'
-        'rhel': 'omnisharp-rhel-x64-netcoreapp1.0.tar.gz'
+        'Centos': 'omnisharp-centos-x64-netcoreapp1.0.tar.gz',
+        'debian': 'omnisharp-debian-x64-netcoreapp1.0.tar.gz',
+        'rhel': 'omnisharp-rhel-x64-netcoreapp1.0.tar.gz',
         'Ubuntu': 'omnisharp-ubuntu-x64-netcoreapp1.0.tar.gz'
       }
       supported_dists = disto_package_names.keys()
