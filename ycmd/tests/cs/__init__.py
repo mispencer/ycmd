@@ -30,7 +30,7 @@ import time
 from inspect import getargspec
 
 from ycmd import handlers
-from ycmd.tests.test_utils import BuildRequest, SetUpApp
+from ycmd.tests.test_utils import BuildRequest, ClearCompletionsCache, SetUpApp
 
 shared_legacy_app = None
 shared_roslyn_app = None
@@ -174,6 +174,7 @@ def SharedYcmd( test ):
 
     try:
       handlers._server_state = shared_app_server_state[ app ]
+      ClearCompletionsCache()
       return test( app, *args, **kwargs )
     finally:
       shared_app_server_state[ app ] = handlers._server_state
