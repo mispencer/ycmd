@@ -22,6 +22,7 @@ from __future__ import print_function
 from __future__ import division
 from builtins import *  # noqa
 from future import standard_library
+from future.utils import iteritems
 standard_library.install_aliases()
 from future.utils import itervalues
 
@@ -689,7 +690,7 @@ class CsharpSolutionCompleter( object ):
 
 
   def _SetDiagnosticsInDiagStructure( self, diagnostics, filename, source ):
-    for key, line in self._diagnostic_store[ filename ][ source ].iteritems():
+    for key, line in iteritems(self._diagnostic_store[ filename ][ source ]):
       del line[:]
 
     for diagnostic in diagnostics:
@@ -697,7 +698,7 @@ class CsharpSolutionCompleter( object ):
 
   def _SetAllFileDiagnosticsInDiagStructure( self, diagnostics, source ):
     for filename in self._diagnostic_store:
-      for key, line in self._diagnostic_store[ filename ][ source ].iteritems():
+      for key, line in iteritems(self._diagnostic_store[ filename ][ source ]):
         del line[:]
 
     for diagnostic in diagnostics:
