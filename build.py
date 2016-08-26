@@ -65,6 +65,8 @@ DYNAMIC_PYTHON_LIBRARY_REGEX = """
   libpython{major}\.{minor}m?\.so(\.\d+)*|
   # OS X
   libpython{major}\.{minor}m?\.dylib|
+  # Cygwin
+  libpython{major}\.{minor}m?\.dll|
   # Windows
   python{major}{minor}\.lib|
   # Cygwin
@@ -79,6 +81,10 @@ def OnMac():
 
 def OnWindows():
   return platform.system() == 'Windows'
+
+
+def OnCygwin():
+  return sys.platform == 'cygwin'
 
 
 def OnTravisOrAppVeyor():
@@ -149,6 +155,8 @@ def CheckCall( args, **kwargs ):
 def GetPossiblePythonLibraryDirectories():
   prefix = sys.base_prefix if PY_MAJOR >= 3 else sys.prefix
 
+  if OnCygwin():
+    return [ sysconfig.get_config_var( 'BINDIR' ) ]
   if OnWindows():
     return [ p.join( prefix, 'libs' ) ]
   # On pyenv and some distributions, there is no Python dynamic library in the

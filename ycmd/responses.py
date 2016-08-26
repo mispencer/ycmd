@@ -24,7 +24,7 @@ from __future__ import absolute_import
 from builtins import *  # noqa
 
 import os
-from ycmd.utils import ProcessIsRunning
+from ycmd.utils import ProcessIsRunning, ConvertFilename
 
 
 YCM_EXTRA_CONF_FILENAME = '.ycm_extra_conf.py'
@@ -68,7 +68,7 @@ def BuildGoToResponse( filepath, line_num, column_num, description = None ):
   return BuildGoToResponseFromLocation(
     Location( line = line_num,
               column = column_num,
-              filename = filepath ),
+              filename = ConvertFilename( filepath, False )),
     description )
 
 
@@ -139,7 +139,7 @@ def BuildLocationData( location ):
   return {
     'line_num': location.line_number_,
     'column_num': location.column_number_,
-    'filepath': location.filename_,
+    'filepath': ConvertFilename( location.filename_, False )
   }
 
 
@@ -201,7 +201,7 @@ class Location( object ):
     absolute path of the file"""
     self.line_number_ = line
     self.column_number_ = column
-    self.filename_ = os.path.realpath( filename )
+    self.filename_ = os.path.realpath( ConvertFilename( filename, False ) )
 
 
 def BuildDiagnosticData( diagnostic ):
