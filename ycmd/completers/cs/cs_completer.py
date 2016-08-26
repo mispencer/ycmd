@@ -334,7 +334,7 @@ class CsharpCompleter( Completer ):
     if filepath not in self._solution_for_file:
       # NOTE: detection could throw an exception if an extra_conf_store needs
       # to be confirmed
-      path_to_solutionfile = solutiondetection.FindSolutionPath( filepath )
+      path_to_solutionfile = solutiondetection.FindSolutionPath( utils.ConvertFilename( filepath, False ) )
       if not path_to_solutionfile:
         raise RuntimeError( 'Autodetection of solution file failed.' )
       self._solution_for_file[ filepath ] = path_to_solutionfile
@@ -383,13 +383,10 @@ class CsharpSolutionCompleter( object ):
                   '-p',
                   str( self._omnisharp_port ),
                   '-s',
-                  u'{0}'.format( path_to_solutionfile ) ]
+                  u'{0}'.format( utils.ConvertFilename( path_to_solutionfile, True ) ) ]
 
       if not utils.OnWindows() and not utils.OnCygwin():
         command.insert( 0, 'mono' )
-
-      if utils.OnCygwin():
-        command.extend( [ '--client-path-mode', 'Cygwin' ] )
 
       filename_format = os.path.join( utils.PathToCreatedTempDir(),
                                       u'omnisharp_{port}_{sln}_{std}.log' )

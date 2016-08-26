@@ -65,6 +65,8 @@ DYNAMIC_PYTHON_LIBRARY_REGEX = """
   libpython{major}\.{minor}m?\.so(\.\d+)*|
   # OS X
   libpython{major}\.{minor}m?\.dylib|
+  # Cygwin
+  libpython{major}\.{minor}m?\.dll|
   # Windows
   python{major}{minor}\.lib
   )$
@@ -77,6 +79,10 @@ def OnMac():
 
 def OnWindows():
   return platform.system() == 'Windows'
+
+
+def OnCygwin():
+  return sys.platform == 'cygwin'
 
 
 def OnTravisOrAppVeyor():
@@ -155,6 +161,8 @@ def GetPossiblePythonLibraryDirectories():
   library_dir = p.dirname( sysconfig.get_python_lib( standard_lib = True ) )
   if OnWindows():
     return [ p.join( library_dir, 'libs' ) ]
+  if OnCygwin():
+    return [ sysconfig.get_config_var( 'BINDIR' ) ]
   # On pyenv, there is no Python dynamic library in the directory returned by
   # the LIBPL variable. Such library is located in the parent folder of the
   # standard Python library modules.
