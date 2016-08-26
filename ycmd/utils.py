@@ -435,6 +435,37 @@ def SplitLines( contents ):
   return lines
 
 
+_cygpath_data = {
+  True: { 'Process': None, 'Data': {} },
+  False: { 'Process': None, 'Data': {} }
+}
+
+def ConvertFilename( filename, direction ):
+  global _cygpath_data
+  if not OnCygwin():
+    return filename
+
+  direction = True if direction else False
+
+  try:
+    return _cygpath_data[ direction ][ 'Data' ][ filename ]
+  except KeyError:
+    cygpath = _cygpath_data[ direction ][ 'Process' ]
+    if not cygpath:
+      dir_arg = '-w' if direction else '-u'
+      command = [ 'cygpath', '-f', '-', dir_arg ]
+      cygpath = SafePopen( command , stdout = subprocess.PIPE, stdin = subprocess.PIPE, bufsize = 1, universal_newlines = True )
+      _cygpath_data[ direction ][ 'Process' ] = cygpath
+
+    cygpath.stdin.write( filename + "\r\n" )
+
+    result = cygpath.stdout.readline().rstrip()
+
+    _cygpath_data[ direction ][ 'Data' ][ filename ] = result
+
+    return result
+
+
 def GetCurrentDirectory():
   """Returns the current directory as an unicode object. If the current
   directory does not exist anymore, returns the temporary folder instead."""

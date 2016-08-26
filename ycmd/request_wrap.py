@@ -23,15 +23,20 @@ from __future__ import division
 from __future__ import absolute_import
 from future import standard_library
 standard_library.install_aliases()
+from future.utils import iteritems
 from builtins import *  # noqa
 
 from ycmd.utils import ( ByteOffsetToCodepointOffset,
                          CodepointOffsetToByteOffset,
                          ToUnicode,
                          ToBytes,
-                         SplitLines )
+                         SplitLines,
+                         ConvertFilename )
+
 from ycmd.identifier_utils import StartOfLongestIdentifierEndingAtIndex
 from ycmd.request_validation import EnsureRequestValid
+import logging
+_logger = logging.getLogger( __name__ )
 
 
 # TODO: Change the custom computed (and other) keys to be actual properties on
@@ -41,6 +46,14 @@ class RequestWrap( object ):
     if validate:
       EnsureRequestValid( request )
     self._request = request
+    self._file_data = {}
+    try:
+      for ( key, value ) in iteritems(self._request[ 'file_data' ]):
+        self._file_data[ _ConvertPath( key ) ] = value
+    except KeyError: 
+      pass
+    self._filepath = _ConvertPath( self._request[ 'filepath' ] )
+    _logger.info( "Input: %s, Output: %s", self._request[ 'filepath' ], self._filepath )
     self._computed_key = {
       # Unicode string representation of the current line
       'line_value': self._CurrentLine,
@@ -71,6 +84,10 @@ class RequestWrap( object ):
       'filetypes': self._Filetypes,
 
       'first_filetype': self._FirstFiletype,
+
+      'filepath': self._Filepath,
+
+      'file_data': self._Filedata,
     }
     self._cached_computed = {}
 
@@ -129,8 +146,20 @@ class RequestWrap( object ):
 
 
   def _Filetypes( self ):
-    path = self[ 'filepath' ]
-    return self[ 'file_data' ][ path ][ 'filetypes' ]
+    path = self._request[ 'filepath' ]
+    return self._request[ 'file_data' ][ path ][ 'filetypes' ]
+
+
+  def _Filepath( self ):
+    return self._filepath
+
+
+  def _Filedata( self ):
+    return self._file_data
+
+
+def _ConvertPath( path ):
+  return ConvertFilename( path, True )
 
 
 def CompletionStartColumn( line_value, column_num, filetype ):
