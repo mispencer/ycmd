@@ -25,10 +25,12 @@ from builtins import *  # noqa
 
 
 from nose import SkipTest
-from nose.tools import eq_
+from nose.tools import eq_, ok_
 from webtest import AppError
 from hamcrest import assert_that, has_entries, contains
 import pprint
+import re
+import os.path
 
 from ycmd.tests.cs import ( IsolatedYcmd, PathToTestFile, SharedYcmd,
                             StopOmniSharpServer, WrapOmniSharpServer )
@@ -637,3 +639,55 @@ def _Subcommands_StopServer_NoErrorIfNotStarted_test( app, use_roslyn ):
   filepath = PathToTestFile( 'testy', 'GotoTestCase.cs' )
   StopOmniSharpServer( app, filepath )
   # Success = no raise
+
+
+@IsolatedYcmd
+def StopServer_KeepLogFiles( app, keeping_log_files ):
+  with UserOption( 'server_keep_logfiles', keeping_log_files ):
+    filepath = PathToTestFile( 'testy', 'GotoTestCase.cs' )
+    contents = ReadFile( filepath )
+    event_data = BuildRequest( filepath = filepath,
+                               filetype = 'cs',
+                               contents = contents,
+                               event_name = 'FileReadyToParse' )
+
+    app.post_json( '/event_notification', event_data )
+    WaitUntilOmniSharpServerReady( app, filepath )
+
+    event_data = BuildRequest( filetype = 'cs', filepath = filepath )
+
+    debuginfo = app.post_json( '/debug_info', event_data ).json
+
+    log_files_match = re.search( "^OmniSharp logfiles:\n(.*)\n(.*)",
+                                 debuginfo,
+                                 re.MULTILINE )
+    stdout_logfiles_location = log_files_match.group( 1 )
+    stderr_logfiles_location = log_files_match.group( 2 )
+
+    try:
+      ok_( os.path.exists(stdout_logfiles_location ),
+           "Logfile should exist at {0}".format( stdout_logfiles_location ) )
+      ok_( os.path.exists( stderr_logfiles_location ),
+           "Logfile should exist at {0}".format( stderr_logfiles_location ) )
+    finally:
+      StopOmniSharpServer( app, filepath )
+
+    if keeping_log_files:
+      ok_( os.path.exists( stdout_logfiles_location ),
+           "Logfile should still exist at "
+           "{0}".format( stdout_logfiles_location ) )
+      ok_( os.path.exists( stderr_logfiles_location ),
+           "Logfile should still exist at "
+           "{0}".format( stderr_logfiles_location ) )
+    else:
+      ok_( not os.path.exists( stdout_logfiles_location ),
+           "Logfile should no longer exist at "
+           "{0}".format( stdout_logfiles_location ) )
+      ok_( not os.path.exists( stderr_logfiles_location ),
+           "Logfile should no longer exist at "
+           "{0}".format( stderr_logfiles_location ) )
+
+
+def Subcommands_StopServer_KeepLogFiles_test():
+  yield StopServer_KeepLogFiles, True
+  yield StopServer_KeepLogFiles, False

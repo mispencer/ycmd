@@ -27,7 +27,6 @@ from contextlib import contextmanager
 import functools
 import os
 import time
-from inspect import getargspec
 
 from ycmd import handlers
 from ycmd.tests.test_utils import BuildRequest, ClearCompletionsCache, SetUpApp
@@ -60,7 +59,7 @@ def StopOmniSharpServer( app, filepath ):
 
 
 def WaitUntilOmniSharpServerReady( app, filepath ):
-  retries = 200
+  retries = 100
   success = False
 
   while retries > 0:
@@ -107,7 +106,7 @@ def setUpPackage():
 def tearDownPackage():
   """Cleans up the tests using the SharedYcmd decorator in this package. It is
   executed once after running all the tests in the package."""
-  global shared_app_filepaths
+  global shared_app, shared_filepaths
 
   for app in shared_app_filepaths:
     old_server_state = handlers._server_state
@@ -121,8 +120,8 @@ def tearDownPackage():
 
 
 @contextmanager
-def WrapOmniSharpServer( app, filepath, use_roslyn ):
-  global shared_app_filepaths
+def WrapOmniSharpServer( app, filepath ):
+  global shared_filepaths
 
   SetRoslynState( app, filepath, use_roslyn )
   if ( app not in shared_app_filepaths
@@ -134,26 +133,18 @@ def WrapOmniSharpServer( app, filepath, use_roslyn ):
   yield
 
 
-def SetRoslynState( app, filepath, use_roslyn ):
-  if use_roslyn:
-    app.post_json( '/run_completer_command',
-                  BuildRequest( completer_target = 'filetype_default',
-                                command_arguments = [ 'UseRoslynOmnisharp' ],
-                                filepath = filepath,
-                                filetype = 'cs' ) )
-  else:
-    app.post_json( '/run_completer_command',
-                  BuildRequest( completer_target = 'filetype_default',
-                                command_arguments = [ 'UseLegacyOmnisharp' ],
-                                filepath = filepath,
-                                filetype = 'cs' ) )
-
-
 def SharedYcmd( test ):
   """Defines a decorator to be attached to tests of this package. This decorator
   passes the shared ycmd application as a parameter.
 
   Do NOT attach it to test generators but directly to the yielded tests."""
+  global shared_legacy_app, shared_roslyn_app
+
+  ( argspec, _, _, _ ) = getargspec( test )
+  try:
+    argindex = argspec.index( 'use_roslyn' )
+  except ValueError:
+    argindex = -1
 
   @functools.wraps( test )
   def Wrapper( *args, **kwargs ):

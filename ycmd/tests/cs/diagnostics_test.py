@@ -24,7 +24,7 @@ standard_library.install_aliases()
 from builtins import *  # noqa
 
 from hamcrest import ( assert_that, contains, contains_string, equal_to,
-                       has_entries )
+                       has_entries, has_entry )
 
 from ycmd.tests.cs import PathToTestFile, SharedYcmd, WrapOmniSharpServer
 from ycmd.tests.test_utils import BuildRequest
@@ -34,6 +34,32 @@ from ycmd.utils import ReadFile
 def Diagnostics_ZeroBasedLineAndColumn_test():
   yield _Diagnostics_ZeroBasedLineAndColumn_test, False
   yield _Diagnostics_ZeroBasedLineAndColumn_test, True
+
+
+@SharedYcmd
+def Diagnostics_Basic_test( app ):
+  filepath = PathToTestFile( 'testy', 'Program.cs' )
+  with WrapOmniSharpServer( app, filepath ):
+    contents = ReadFile( filepath )
+
+    event_data = BuildRequest( filepath = filepath,
+                               event_name = 'FileReadyToParse',
+                               filetype = 'cs',
+                               contents = contents )
+    app.post_json( '/event_notification', event_data )
+
+    diag_data = BuildRequest( filepath = filepath,
+                              filetype = 'cs',
+                              contents = contents,
+                              line_num = 11,
+                              column_num = 2 )
+
+    results = app.post_json( '/detailed_diagnostic', diag_data ).json
+    assert_that( results,
+                 has_entry(
+                     'message',
+                     contains_string(
+                       "Unexpected symbol `}'', expecting identifier" ) ) )
 
 
 @SharedYcmd
