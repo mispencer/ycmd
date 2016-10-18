@@ -26,10 +26,11 @@ from builtins import *  # noqa
 from contextlib import contextmanager
 import functools
 import os
-import time
 
 from ycmd import handlers
-from ycmd.tests.test_utils import BuildRequest, ClearCompletionsCache, SetUpApp
+from ycmd.tests.test_utils import ( ClearCompletionsCache, SetUpApp,
+                                    StartCompleterServer, StopCompleterServer,
+                                    WaitUntilCompleterServerReady )
 
 shared_legacy_app = None
 shared_roslyn_app = None
@@ -40,45 +41,6 @@ shared_app_filepaths = {}
 def PathToTestFile( *args ):
   dir_of_current_script = os.path.dirname( os.path.abspath( __file__ ) )
   return os.path.join( dir_of_current_script, 'testdata', *args )
-
-
-def StartOmniSharpServer( app, filepath ):
-  app.post_json( '/run_completer_command',
-                 BuildRequest( completer_target = 'filetype_default',
-                               command_arguments = [ "StartServer" ],
-                               filepath = filepath,
-                               filetype = 'cs' ) )
-
-
-def StopOmniSharpServer( app, filepath ):
-  app.post_json( '/run_completer_command',
-                 BuildRequest( completer_target = 'filetype_default',
-                               command_arguments = [ 'StopServer' ],
-                               filepath = filepath,
-                               filetype = 'cs' ) )
-
-
-def WaitUntilOmniSharpServerReady( app, filepath ):
-  retries = 100
-  success = False
-
-  while retries > 0:
-    result = app.get( '/ready', { 'subserver': 'cs' } ).json
-    if result:
-      success = True
-      break
-    request = BuildRequest( completer_target = 'filetype_default',
-                            command_arguments = [ 'ServerIsRunning' ],
-                            filepath = filepath,
-                            filetype = 'cs' )
-    result = app.post_json( '/run_completer_command', request ).json
-    if not result:
-      raise RuntimeError( "OmniSharp failed during startup." )
-    time.sleep( 0.2 )
-    retries = retries - 1
-
-  if not success:
-    raise RuntimeError( "Timeout waiting for OmniSharpServer" )
 
 
 def setUpPackage():
@@ -113,7 +75,7 @@ def tearDownPackage():
     try:
       handlers._server_state = shared_app_server_state[ app ]
       for filepath in shared_app_filepaths[ app ]:
-        StopOmniSharpServer( app, filepath )
+        StopCompleterServer( app, 'cs', filepath )
     finally:
       shared_app_server_state[ app ] = handlers._server_state
       handlers._server_state = old_server_state
@@ -126,10 +88,11 @@ def WrapOmniSharpServer( app, filepath ):
   SetRoslynState( app, filepath, use_roslyn )
   if ( app not in shared_app_filepaths
        or filepath not in shared_app_filepaths[ app ] ):
-    StartOmniSharpServer( app, filepath )
+    StartCompleterServer( app, 'cs', filepath )
     if app in shared_app_filepaths:
       shared_app_filepaths[ app ].append( filepath )
-  WaitUntilOmniSharpServerReady( app, filepath )
+  WaitUntilCompleterServerReady( app, 'cs' )
+# WaitUntilCompleterServerReady( app, 'cs', filepath )
   yield
 
 

@@ -23,12 +23,13 @@ from future import standard_library
 standard_library.install_aliases()
 from builtins import *  # noqa
 
-import atexit
 import bottle
 import json
 import logging
+import time
 import traceback
 from bottle import request
+from threading import Thread
 
 import ycm_core
 from ycmd import extra_conf_store, hmac_plugin, server_state, user_options_store
@@ -40,12 +41,13 @@ from ycmd.completers.completer_utils import FilterAndSortCandidatesWrap
 
 # num bytes for the request body buffer; request.json only works if the request
 # size is less than this
-bottle.Request.MEMFILE_MAX = 1000 * 1024
+bottle.Request.MEMFILE_MAX = 10 * 1024 * 1024
 
 _server_state = None
 _hmac_secret = bytes()
 _logger = logging.getLogger( __name__ )
 app = bottle.Bottle()
+wsgi_server = None
 
 
 @app.post( '/event_notification' )
@@ -188,12 +190,16 @@ def LoadExtraConfFile():
   request_data = RequestWrap( request.json, validate = False )
   extra_conf_store.Load( request_data[ 'filepath' ], force = True )
 
+  return _JsonResponse( True )
+
 
 @app.post( '/ignore_extra_conf_file' )
 def IgnoreExtraConfFile():
   _logger.info( 'Received extra conf ignore request' )
   request_data = RequestWrap( request.json, validate = False )
   extra_conf_store.Disable( request_data[ 'filepath' ] )
+
+  return _JsonResponse( True )
 
 
 @app.post( '/debug_info' )
@@ -211,12 +217,20 @@ def DebugInfo():
   request_data = RequestWrap( request.json )
   try:
     output.append(
-        _GetCompleterForRequestData( request_data ).DebugInfo( request_data) )
+        _GetCompleterForRequestData( request_data ).DebugInfo( request_data ) )
   except Exception:
     _logger.debug( 'Exception in debug info request: '
                    + traceback.format_exc() )
 
   return _JsonResponse( '\n'.join( output ) )
+
+
+@app.post( '/shutdown' )
+def Shutdown():
+  _logger.info( 'Received shutdown request' )
+  ServerShutdown()
+
+  return _JsonResponse( True )
 
 
 # The type of the param is Bottle.HTTPError
@@ -255,9 +269,19 @@ def _GetCompleterForRequestData( request_data ):
     return _server_state.GetFiletypeCompleter( [ completer_target ] )
 
 
-@atexit.register
 def ServerShutdown():
-  _logger.info( 'Server shutting down' )
+  def Terminator():
+    if wsgi_server:
+      wsgi_server.Shutdown()
+
+  # Use a separate thread to let the server send the response before shutting
+  # down.
+  terminator = Thread( target = Terminator )
+  terminator.daemon = True
+  terminator.start()
+
+
+def ServerCleanup():
   if _server_state:
     _server_state.Shutdown()
     extra_conf_store.Shutdown()
@@ -286,3 +310,19 @@ def SetServerStateToDefaults():
   user_options_store.LoadDefaults()
   _server_state = server_state.ServerState( user_options_store.GetAll() )
   extra_conf_store.Reset()
+
+
+def KeepSubserversAlive( check_interval_seconds ):
+  def Keepalive( check_interval_seconds ):
+    while True:
+      time.sleep( check_interval_seconds )
+
+      _logger.debug( 'Keeping subservers alive' )
+      loaded_completers = _server_state.GetLoadedFiletypeCompleters()
+      for completer in loaded_completers:
+        completer.ServerIsHealthy()
+
+  keepalive = Thread( target = Keepalive,
+                      args = ( check_interval_seconds, ) )
+  keepalive.daemon = True
+  keepalive.start()

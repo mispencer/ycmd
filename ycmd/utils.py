@@ -26,20 +26,18 @@ standard_library.install_aliases()
 from builtins import *  # noqa
 from future.utils import PY2, native
 
-import tempfile
 import os
-import sys
-import signal
 import socket
 import stat
 import subprocess
+import sys
+import tempfile
+import time
 
 
 # Creation flag to disable creating a console window on Windows. See
 # https://msdn.microsoft.com/en-us/library/windows/desktop/ms684863.aspx
 CREATE_NO_WINDOW = 0x08000000
-# Executable extensions used on Windows
-WIN_EXECUTABLE_EXTS = [ '.exe', '.bat', '.cmd' ]
 
 # Don't use this! Call PathToCreatedTempDir() instead. This exists for the sake
 # of tests.
@@ -48,6 +46,8 @@ RAW_PATH_TO_TEMP_DIR = os.path.join( tempfile.gettempdir(), 'ycm_temp' )
 # Readable, writable and executable by everyone.
 ACCESSIBLE_TO_ALL_MASK = ( stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH |
                            stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP )
+
+EXECUTABLE_FILE_MASK = os.F_OK | os.X_OK
 
 
 # Python 3 complains on the common open(path).read() idiom because the file
@@ -95,6 +95,22 @@ def ToUnicode( value ):
     # All incoming text should be utf8
     return str( value, 'utf8' )
   return str( value )
+
+
+# When lines is an iterable of all strings or all bytes, equivalent to
+#   '\n'.join( ToUnicode( lines ) )
+# but faster on large inputs.
+def JoinLinesAsUnicode( lines ):
+  try:
+    first = next( iter( lines ) )
+  except StopIteration:
+    return str()
+
+  if isinstance( first, str ):
+    return ToUnicode( '\n'.join( lines ) )
+  if isinstance( first, bytes ):
+    return ToUnicode( b'\n'.join( lines ) )
+  raise ValueError( 'lines must contain either strings or bytes.' )
 
 
 # Consistently returns the new bytes() type from python-future. Assumes incoming
@@ -208,27 +224,56 @@ def PathToFirstExistingExecutable( executable_name_list ):
   return None
 
 
-# On Windows, distutils.spawn.find_executable only works for .exe files
-# but .bat and .cmd files are also executables, so we use our own
-# implementation.
-def FindExecutable( executable ):
-  paths = os.environ[ 'PATH' ].split( os.pathsep )
-  base, extension = os.path.splitext( executable )
-
-  if OnWindows() and extension.lower() not in WIN_EXECUTABLE_EXTS:
-    extensions = WIN_EXECUTABLE_EXTS
-  else:
-    extensions = ['']
-
-  for extension in extensions:
-    executable_name = executable + extension
-    if not os.path.isfile( executable_name ):
-      for path in paths:
-        executable_path = os.path.join(path, executable_name )
-        if os.path.isfile( executable_path ):
-          return executable_path
+def _GetWindowsExecutable( filename ):
+  def _GetPossibleWindowsExecutable( filename ):
+    pathext = [ ext.lower() for ext in
+                os.environ.get( 'PATHEXT', '' ).split( os.pathsep ) ]
+    base, extension = os.path.splitext( filename )
+    if extension.lower() in pathext:
+      return [ filename ]
     else:
-      return executable_name
+      return [ base + ext for ext in pathext ]
+
+  for exe in _GetPossibleWindowsExecutable( filename ):
+    if os.path.isfile( exe ):
+      return exe
+  return None
+
+
+# Check that a given file can be accessed as an executable file, so controlling
+# the access mask on Unix and if has a valid extension on Windows. It returns
+# the path to the executable or None if no executable was found.
+def GetExecutable( filename ):
+  if OnWindows():
+    return _GetWindowsExecutable( filename )
+
+  if ( os.path.isfile( filename )
+       and os.access( filename, EXECUTABLE_FILE_MASK ) ):
+    return filename
+  return None
+
+
+# Adapted from https://hg.python.org/cpython/file/3.5/Lib/shutil.py#l1081
+# to be backward compatible with Python2 and more consistent to our codebase.
+def FindExecutable( executable ):
+  # If we're given a path with a directory part, look it up directly rather
+  # than referring to PATH directories. This includes checking relative to the
+  # current directory, e.g. ./script
+  if os.path.dirname( executable ):
+    return GetExecutable( executable )
+
+  paths = os.environ[ 'PATH' ].split( os.pathsep )
+
+  if OnWindows():
+    # The current directory takes precedence on Windows.
+    curdir = os.path.abspath( os.curdir )
+    if curdir not in paths:
+      paths.insert( 0, curdir )
+
+  for path in paths:
+    exe = GetExecutable( os.path.join( path, executable ) )
+    if exe:
+      return exe
   return None
 
 
@@ -252,18 +297,15 @@ def ProcessIsRunning( handle ):
   return handle is not None and handle.poll() is None
 
 
-# From here: http://stackoverflow.com/a/8536476/1672783
-def TerminateProcess( pid ):
-  if OnWindows():
-    import ctypes
-    PROCESS_TERMINATE = 1
-    handle = ctypes.windll.kernel32.OpenProcess( PROCESS_TERMINATE,
-                                                 False,
-                                                 pid )
-    ctypes.windll.kernel32.TerminateProcess( handle, -1 )
-    ctypes.windll.kernel32.CloseHandle( handle )
-  else:
-    os.kill( pid, signal.SIGTERM )
+def WaitUntilProcessIsTerminated( handle, timeout = 5 ):
+  expiration = time.time() + timeout
+  while True:
+    if time.time() > expiration:
+      raise RuntimeError( 'Waited process to terminate for {0} seconds, '
+                          'aborting.'.format( timeout ) )
+    if not ProcessIsRunning( handle ):
+      return
+    time.sleep( 0.1 )
 
 
 def PathsToAllParentFolders( path ):
@@ -403,3 +445,17 @@ def SplitLines( contents ):
     lines.append( '' )
 
   return lines
+
+
+def GetCurrentDirectory():
+  """Returns the current directory as an unicode object. If the current
+  directory does not exist anymore, returns the temporary folder instead."""
+  try:
+    if PY2:
+      return os.getcwdu()
+    return os.getcwd()
+  # os.getcwdu throws an OSError exception when the current directory has been
+  # deleted while os.getcwd throws a FileNotFoundError, which is a subclass of
+  # OSError.
+  except OSError:
+    return tempfile.gettempdir()

@@ -147,8 +147,8 @@ class Completer( with_metaclass( abc.ABCMeta, object ) ):
   custom cleanup logic on server shutdown.
 
   If your completer uses an external server process, then it can be useful to
-  implement the ServerIsReady member function to handle the /ready request. This
-  is very useful for the test suite."""
+  implement the ServerIsHealthy member function to handle the /healthy request.
+  This is very useful for the test suite."""
 
   def __init__( self, user_options ):
     self.user_options = user_options
@@ -241,11 +241,18 @@ class Completer( with_metaclass( abc.ABCMeta, object ) ):
 
 
   def ComputeCandidatesInner( self, request_data ):
-    pass
+    pass # pragma: no cover
 
 
   def DefinedSubcommands( self ):
-    return sorted( self.GetSubcommandsMap().keys() )
+    subcommands = sorted( self.GetSubcommandsMap().keys() )
+    try:
+      # We don't want expose this subcommand because it is not really needed
+      # for the user but it is useful in tests for tearing down the server
+      subcommands.remove( 'StopServer' )
+    except ValueError:
+      pass
+    return subcommands
 
 
   def GetSubcommandsMap( self ):
@@ -300,19 +307,19 @@ class Completer( with_metaclass( abc.ABCMeta, object ) ):
 
 
   def OnFileReadyToParse( self, request_data ):
-    pass
+    pass # pragma: no cover
 
 
   def OnBufferVisit( self, request_data ):
-    pass
+    pass # pragma: no cover
 
 
   def OnBufferUnload( self, request_data ):
-    pass
+    pass # pragma: no cover
 
 
   def OnInsertLeave( self, request_data ):
-    pass
+    pass # pragma: no cover
 
 
   def OnUserCommand( self, arguments, request_data ):
@@ -330,7 +337,7 @@ class Completer( with_metaclass( abc.ABCMeta, object ) ):
 
 
   def OnCurrentIdentifierFinished( self, request_data ):
-    pass
+    pass # pragma: no cover
 
 
   def GetDiagnosticsForCurrentFile( self, request_data ):
@@ -361,11 +368,15 @@ class Completer( with_metaclass( abc.ABCMeta, object ) ):
 
 
   def Shutdown( self ):
-    pass
+    pass # pragma: no cover
 
 
   def ServerIsReady( self ):
-    """Called by the /ready handler to check if the underlying completion
+    return self.ServerIsHealthy()
+
+
+  def ServerIsHealthy( self ):
+    """Called by the /healthy handler to check if the underlying completion
     server is started and ready to receive requests. Returns bool."""
     return True
 

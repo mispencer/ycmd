@@ -33,6 +33,7 @@ import sys
 from ycmd.server_utils import ( AddNearestThirdPartyFoldersToSysPath,
                                 CompatibleWithCurrentCore,
                                 PathToNearestThirdPartyFolder )
+from ycmd.tests import PathToTestFile
 
 DIR_OF_THIRD_PARTY = os.path.abspath(
   os.path.join( os.path.dirname( __file__ ), '..', '..', 'third_party' ) )
@@ -169,51 +170,50 @@ def AddNearestThirdPartyFoldersToSysPath_Failure_test():
     raises( RuntimeError, '.*third_party folder.*' ) )
 
 
-@patch( 'sys.path', [ '/some/path',
-                      '/first/path/to/site-packages',
-                      '/another/path',
-                      '/second/path/to/site-packages' ] )
-def AddNearestThirdPartyFoldersToSysPath_FutureBeforeSitePackages_test():
+@patch( 'sys.path', [
+  PathToTestFile( 'python-future', 'some', 'path' ),
+  PathToTestFile( 'python-future', 'standard_library' ),
+  PathToTestFile( 'python-future', 'standard_library', 'site-packages' ),
+  PathToTestFile( 'python-future', 'another', 'path' ) ] )
+def AddNearestThirdPartyFoldersToSysPath_FutureAfterStandardLibrary_test(
+  *args ):
   AddNearestThirdPartyFoldersToSysPath( __file__ )
   assert_that( sys.path[ : len( THIRD_PARTY_FOLDERS ) ], contains_inanyorder(
     *THIRD_PARTY_FOLDERS
   ) )
   assert_that( sys.path[ len( THIRD_PARTY_FOLDERS ) : ], contains(
-    '/some/path',
+    PathToTestFile( 'python-future', 'some', 'path' ),
+    PathToTestFile( 'python-future', 'standard_library' ),
     os.path.join( DIR_OF_THIRD_PARTY, 'python-future', 'src' ),
-    '/first/path/to/site-packages',
-    '/another/path',
-    '/second/path/to/site-packages',
+    PathToTestFile( 'python-future', 'standard_library', 'site-packages' ),
+    PathToTestFile( 'python-future', 'another', 'path' )
   ) )
 
 
-@patch( 'sys.path', [ '/some/path',
-                      '/first/path/to/dist-packages',
-                      '/another/path',
-                      '/second/path/to/dist-packages' ] )
-def AddNearestThirdPartyFoldersToSysPath_FutureBeforeDistPackages_test():
+@patch( 'sys.path', [
+  PathToTestFile( 'python-future', 'some', 'path' ),
+  PathToTestFile( 'python-future', 'another', 'path' ) ] )
+def AddNearestThirdPartyFoldersToSysPath_ErrorIfNoStandardLibrary_test( *args ):
+  assert_that(
+    calling( AddNearestThirdPartyFoldersToSysPath ).with_args( __file__ ),
+    raises( RuntimeError,
+            'Could not find standard library path in Python path.' ) )
+
+
+@patch( 'sys.path', [
+  PathToTestFile( 'python-future', 'some', 'path' ),
+  PathToTestFile( 'python-future', 'virtualenv_library' ),
+  PathToTestFile( 'python-future', 'standard_library' ),
+  PathToTestFile( 'python-future', 'another', 'path' ) ] )
+def AddNearestThirdPartyFoldersToSysPath_IgnoreVirtualEnvLibrary_test( *args ):
   AddNearestThirdPartyFoldersToSysPath( __file__ )
   assert_that( sys.path[ : len( THIRD_PARTY_FOLDERS ) ], contains_inanyorder(
     *THIRD_PARTY_FOLDERS
   ) )
   assert_that( sys.path[ len( THIRD_PARTY_FOLDERS ) : ], contains(
-    '/some/path',
+    PathToTestFile( 'python-future', 'some', 'path' ),
+    PathToTestFile( 'python-future', 'virtualenv_library' ),
+    PathToTestFile( 'python-future', 'standard_library' ),
     os.path.join( DIR_OF_THIRD_PARTY, 'python-future', 'src' ),
-    '/first/path/to/dist-packages',
-    '/another/path',
-    '/second/path/to/dist-packages',
-  ) )
-
-
-@patch( 'sys.path', [ '/some/path',
-                      '/another/path' ] )
-def AddNearestThirdPartyFoldersToSysPath_FutureLastIfNoPackages_test():
-  AddNearestThirdPartyFoldersToSysPath( __file__ )
-  assert_that( sys.path[ : len( THIRD_PARTY_FOLDERS ) ], contains_inanyorder(
-    *THIRD_PARTY_FOLDERS
-  ) )
-  assert_that( sys.path[ len( THIRD_PARTY_FOLDERS ) : ], contains(
-    '/some/path',
-    '/another/path',
-    os.path.join( DIR_OF_THIRD_PARTY, 'python-future', 'src' ),
+    PathToTestFile( 'python-future', 'another', 'path' )
   ) )

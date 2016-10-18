@@ -33,10 +33,13 @@ import re
 import os.path
 
 from ycmd.tests.cs import ( IsolatedYcmd, PathToTestFile, SharedYcmd,
-                            StopOmniSharpServer, WrapOmniSharpServer )
+                            WrapOmniSharpServer )
 from ycmd.tests.test_utils import ( BuildRequest,
+                                    ChunkMatcher,
                                     LocationMatcher,
-                                    ChunkMatcher )
+                                    StopCompleterServer,
+                                    UserOption,
+                                    WaitUntilCompleterServerReady )
 from ycmd.utils import ReadFile
 
 
@@ -637,7 +640,7 @@ def Subcommands_StopServer_NoErrorIfNotStarted_test():
 @IsolatedYcmd
 def _Subcommands_StopServer_NoErrorIfNotStarted_test( app, use_roslyn ):
   filepath = PathToTestFile( 'testy', 'GotoTestCase.cs' )
-  StopOmniSharpServer( app, filepath )
+  StopCompleterServer( app, 'cs', filepath )
   # Success = no raise
 
 
@@ -652,15 +655,15 @@ def StopServer_KeepLogFiles( app, keeping_log_files ):
                                event_name = 'FileReadyToParse' )
 
     app.post_json( '/event_notification', event_data )
-    WaitUntilOmniSharpServerReady( app, filepath )
+    WaitUntilCompleterServerReady( app, 'cs' )
 
     event_data = BuildRequest( filetype = 'cs', filepath = filepath )
 
     debuginfo = app.post_json( '/debug_info', event_data ).json
 
-    log_files_match = re.search( "^OmniSharp logfiles:\n(.*)\n(.*)",
-                                 debuginfo,
-                                 re.MULTILINE )
+    log_files_match = re.search( '^  OmniSharp logfiles:\n'
+                                 '    (.*)\n'
+                                 '    (.*)', debuginfo, re.MULTILINE )
     stdout_logfiles_location = log_files_match.group( 1 )
     stderr_logfiles_location = log_files_match.group( 2 )
 
@@ -670,7 +673,7 @@ def StopServer_KeepLogFiles( app, keeping_log_files ):
       ok_( os.path.exists( stderr_logfiles_location ),
            "Logfile should exist at {0}".format( stderr_logfiles_location ) )
     finally:
-      StopOmniSharpServer( app, filepath )
+      StopCompleterServer( app, 'cs', filepath )
 
     if keeping_log_files:
       ok_( os.path.exists( stdout_logfiles_location ),

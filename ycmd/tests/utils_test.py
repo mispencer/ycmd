@@ -27,13 +27,16 @@ from builtins import *  # noqa
 
 import os
 import subprocess
+import tempfile
 from shutil import rmtree
 import ycm_core
 from future.utils import native
 from mock import patch, call
-from nose.tools import eq_, ok_
+from nose.tools import eq_, ok_, raises
 from ycmd import utils
-from ycmd.tests.test_utils import Py2Only, Py3Only, WindowsOnly
+from ycmd.tests.test_utils import ( Py2Only, Py3Only, WindowsOnly, UnixOnly,
+                                    CurrentWorkingDirectory,
+                                    TemporaryExecutable )
 from ycmd.tests import PathToTestFile
 
 # NOTE: isinstance() vs type() is carefully used in this test file. Before
@@ -159,6 +162,57 @@ def ToUnicode_None_test():
 
 
 @Py2Only
+def JoinLinesAsUnicode_Py2Bytes_test():
+  value = utils.JoinLinesAsUnicode( [ bytes( 'abc' ), bytes( 'xyz' ) ] )
+  eq_( value, u'abc\nxyz' )
+  ok_( isinstance( value, str ) )
+
+
+@Py2Only
+def JoinLinesAsUnicode_Py2Str_test():
+  value = utils.JoinLinesAsUnicode( [ 'abc', 'xyz' ] )
+  eq_( value, u'abc\nxyz' )
+  ok_( isinstance( value, str ) )
+
+
+@Py2Only
+def JoinLinesAsUnicode_Py2FutureStr_test():
+  value = utils.JoinLinesAsUnicode( [ str( 'abc' ), str( 'xyz' ) ] )
+  eq_( value, u'abc\nxyz' )
+  ok_( isinstance( value, str ) )
+
+
+@Py2Only
+def JoinLinesAsUnicode_Py2Unicode_test():
+  value = utils.JoinLinesAsUnicode( [ u'abc', u'xyz' ] )
+  eq_( value, u'abc\nxyz' )
+  ok_( isinstance( value, str ) )
+
+
+def JoinLinesAsUnicode_Bytes_test():
+  value = utils.JoinLinesAsUnicode( [ bytes( b'abc' ), bytes( b'xyz' ) ] )
+  eq_( value, u'abc\nxyz' )
+  ok_( isinstance( value, str ) )
+
+
+def JoinLinesAsUnicode_Str_test():
+  value = utils.JoinLinesAsUnicode( [ u'abc', u'xyz' ] )
+  eq_( value, u'abc\nxyz' )
+  ok_( isinstance( value, str ) )
+
+
+def JoinLinesAsUnicode_EmptyList_test():
+  value = utils.JoinLinesAsUnicode( [ ] )
+  eq_( value, u'' )
+  ok_( isinstance( value, str ) )
+
+
+@raises( ValueError )
+def JoinLinesAsUnicode_BadInput_test():
+  utils.JoinLinesAsUnicode( [ 42 ] )
+
+
+@Py2Only
 def ToCppStringCompatible_Py2Str_test():
   value = utils.ToCppStringCompatible( 'abc' )
   eq_( value, 'abc' )
@@ -281,14 +335,24 @@ def PathToFirstExistingExecutable_Failure_test():
   ok_( not utils.PathToFirstExistingExecutable( [ 'ycmd-foobar' ] ) )
 
 
-@patch( 'ycmd.utils.OnWindows', return_value = False )
+@UnixOnly
 @patch( 'subprocess.Popen' )
-def SafePopen_RemovesStdinWindows_test( *args ):
-  utils.SafePopen( [ 'foo' ], stdin_windows = subprocess.PIPE )
+def SafePopen_RemoveStdinWindows_test( *args ):
+  utils.SafePopen( [ 'foo' ], stdin_windows = 'bar' )
   eq_( subprocess.Popen.call_args, call( [ 'foo' ] ) )
 
 
-@patch( 'ycmd.utils.OnWindows', return_value = True )
+@WindowsOnly
+@patch( 'subprocess.Popen' )
+def SafePopen_ReplaceStdinWindowsPIPEOnWindows_test( *args ):
+  utils.SafePopen( [ 'foo' ], stdin_windows = subprocess.PIPE )
+  eq_( subprocess.Popen.call_args,
+       call( [ 'foo' ],
+             stdin = subprocess.PIPE,
+             creationflags = utils.CREATE_NO_WINDOW ) )
+
+
+@WindowsOnly
 @patch( 'ycmd.utils.GetShortPathName', side_effect = lambda x: x )
 @patch( 'subprocess.Popen' )
 def SafePopen_WindowsPath_test( *args ):
@@ -305,21 +369,21 @@ def SafePopen_WindowsPath_test( *args ):
     os.remove( tempfile )
 
 
-@patch( 'ycmd.utils.OnWindows', return_value = False )
+@UnixOnly
 def ConvertArgsToShortPath_PassthroughOnUnix_test( *args ):
   eq_( 'foo', utils.ConvertArgsToShortPath( 'foo' ) )
   eq_( [ 'foo' ], utils.ConvertArgsToShortPath( [ 'foo' ] ) )
 
 
-@patch( 'ycmd.utils.OnWindows', return_value = False )
-def SetEnviron_UnicodeNotOnWindows_test( *args ):
+@UnixOnly
+def SetEnviron_UnicodeOnUnix_test( *args ):
   env = {}
   utils.SetEnviron( env, u'key', u'value' )
   eq_( env, { u'key': u'value' } )
 
 
 @Py2Only
-@patch( 'ycmd.utils.OnWindows', return_value = True )
+@WindowsOnly
 def SetEnviron_UnicodeOnWindows_test( *args ):
   env = {}
   utils.SetEnviron( env, u'key', u'value' )
@@ -463,3 +527,55 @@ def SplitLines_test():
 
   for test in tests:
     yield lambda: eq_( utils.SplitLines( test[ 0 ] ), test[ 1 ] )
+
+
+def FindExecutable_AbsolutePath_test():
+  with TemporaryExecutable() as executable:
+    eq_( executable, utils.FindExecutable( executable ) )
+
+
+def FindExecutable_RelativePath_test():
+  with TemporaryExecutable() as executable:
+    dirname, exename = os.path.split( executable )
+    relative_executable = os.path.join( '.', exename )
+    with CurrentWorkingDirectory( dirname ):
+      eq_( relative_executable, utils.FindExecutable( relative_executable ) )
+
+
+@patch.dict( 'os.environ', { 'PATH': tempfile.gettempdir() } )
+def FindExecutable_ExecutableNameInPath_test():
+  with TemporaryExecutable() as executable:
+    dirname, exename = os.path.split( executable )
+    eq_( executable, utils.FindExecutable( exename ) )
+
+
+def FindExecutable_ReturnNoneIfFileIsNotExecutable_test():
+  with tempfile.NamedTemporaryFile() as non_executable:
+    eq_( None, utils.FindExecutable( non_executable.name ) )
+
+
+@WindowsOnly
+def FindExecutable_CurrentDirectory_test():
+  with TemporaryExecutable() as executable:
+    dirname, exename = os.path.split( executable )
+    with CurrentWorkingDirectory( dirname ):
+      eq_( executable, utils.FindExecutable( exename ) )
+
+
+@WindowsOnly
+@patch.dict( 'os.environ', { 'PATHEXT': '.xyz' } )
+def FindExecutable_AdditionalPathExt_test():
+  with TemporaryExecutable( extension = '.xyz' ) as executable:
+    eq_( executable, utils.FindExecutable( executable ) )
+
+
+@Py2Only
+def GetCurrentDirectory_Py2NoCurrentDirectory_test():
+  with patch( 'os.getcwdu', side_effect = OSError ):
+    eq_( utils.GetCurrentDirectory(), tempfile.gettempdir() )
+
+
+@Py3Only
+def GetCurrentDirectory_Py3NoCurrentDirectory_test():
+  with patch( 'os.getcwd', side_effect = FileNotFoundError ): # noqa
+    eq_( utils.GetCurrentDirectory(), tempfile.gettempdir() )

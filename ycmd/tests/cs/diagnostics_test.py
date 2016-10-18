@@ -31,21 +31,22 @@ from ycmd.tests.test_utils import BuildRequest
 from ycmd.utils import ReadFile
 
 
-def Diagnostics_ZeroBasedLineAndColumn_test():
-  yield _Diagnostics_ZeroBasedLineAndColumn_test, False
-  yield _Diagnostics_ZeroBasedLineAndColumn_test, True
+def Diagnostics_Basic_test():
+  yield _Diagnostics_Basic_test, False
+  yield _Diagnostics_Basic_test, True
 
 
 @SharedYcmd
-def Diagnostics_Basic_test( app ):
+def Diagnostics_Basic_test( app, use_roslyn ):
   filepath = PathToTestFile( 'testy', 'Program.cs' )
-  with WrapOmniSharpServer( app, filepath ):
+  with WrapOmniSharpServer( app, filepath, use_roslyn ):
     contents = ReadFile( filepath )
 
     event_data = BuildRequest( filepath = filepath,
                                event_name = 'FileReadyToParse',
                                filetype = 'cs',
                                contents = contents )
+
     app.post_json( '/event_notification', event_data )
 
     diag_data = BuildRequest( filepath = filepath,
@@ -56,10 +57,12 @@ def Diagnostics_Basic_test( app ):
 
     results = app.post_json( '/detailed_diagnostic', diag_data ).json
     assert_that( results,
-                 has_entry(
-                     'message',
-                     contains_string(
-                       "Unexpected symbol `}'', expecting identifier" ) ) )
+        _Diagnostics_CsCompleter_ExpectedResult( use_roslyn, True ) )
+
+
+def Diagnostics_ZeroBasedLineAndColumn_test():
+  yield _Diagnostics_ZeroBasedLineAndColumn_test, False
+  yield _Diagnostics_ZeroBasedLineAndColumn_test, True
 
 
 @SharedYcmd
@@ -104,6 +107,30 @@ def _Diagnostics_MultipleSolution_test( app, use_roslyn ):
 
       assert_that( results,
         _Diagnostics_CsCompleter_ExpectedResult( use_roslyn, main_error ) )
+
+
+def Diagnostics_WithRange_test():
+  yield _Diagnostics_WithRange_test, False
+  yield _Diagnostics_WithRange_test, True
+
+
+@SharedYcmd
+def _Diagnostics_WithRange_test( app, use_roslyn ):
+  filepath = PathToTestFile( 'testy', 'DiagnosticRange.cs' )
+  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+    contents = ReadFile( filepath )
+
+    results = {}
+    for _ in ( 0, 1 ):  # First call always returns blank for some reason
+      event_data = BuildRequest( filepath = filepath,
+                                 event_name = 'FileReadyToParse',
+                                 filetype = 'cs',
+                                 contents = contents )
+
+      results = app.post_json( '/event_notification', event_data ).json
+
+    assert_that( results,
+        _Diagnostics_CsCompleter_ExpectedResult( use_roslyn, True ) )
 
 
 def _Diagnostics_CsCompleter_ExpectedResult( use_roslyn, flag ):
@@ -152,5 +179,28 @@ def _Diagnostics_CsCompleter_ExpectedResult( use_roslyn, flag ):
     entries.append(
       build_matcher( 'ERROR', "Unexpected symbol `}'', expecting identifier",
                       11, 2 )
+    )
+    entries.append(
+#     build_matcher( 'WARNING', "Name should have prefix '_'",
+#                    3, 16 )
+      has_entries( {
+        'kind': equal_to( 'WARNING' ),
+        'text': contains_string(
+            "Name should have prefix '_'" ),
+        'location': has_entries( {
+            'line_num': 3,
+            'column_num': 16
+            } ),
+        'location_extent': has_entries( {
+            'start': has_entries( {
+                'line_num': 3,
+                'column_num': 16,
+                } ),
+            'end': has_entries( {
+                'line_num': 3,
+                'column_num': 25,
+                } ),
+            } )
+        } )
     )
   return contains( *entries )

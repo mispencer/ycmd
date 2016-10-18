@@ -30,38 +30,53 @@ if ( USE_CLANG_COMPLETER AND
      NOT PATH_TO_LLVM_ROOT AND
      NOT EXTERNAL_LIBCLANG_PATH )
 
-  set( CLANG_VERSION "3.8.0" )
+  set( CLANG_VERSION "3.9.0" )
 
   if ( APPLE )
     set( CLANG_DIRNAME "clang+llvm-${CLANG_VERSION}-x86_64-apple-darwin" )
     set( CLANG_SHA256
-         "e5a961e04b0e1738bbb5b824886a34932dc13b0af699d1fe16519d814d7b776f" )
+         "bd689aaeafa19832016d5a4917405a73b21bc5281846c0cb816e9545cf99e82b" )
     set( CLANG_FILENAME "${CLANG_DIRNAME}.tar.xz" )
   elseif ( WIN32 )
     if( 64_BIT_PLATFORM )
       set( CLANG_DIRNAME "LLVM-${CLANG_VERSION}-win64" )
       set( CLANG_SHA256
-           "f9c3147157db32beab025314db9b82c600e182d82994880c1d844c70e29d76ef" )
+           "3e5b53a79266d3f7f1d5cb4d94283fe2bc61f9689e55f39e3939364f4076b0c9" )
     else()
       set( CLANG_DIRNAME "LLVM-${CLANG_VERSION}-win32" )
       set( CLANG_SHA256
-           "ebdb056ebc6efd57c0643733a099920d1d5760a4d570580243e6c63f4b52920f" )
+           "b4eaa1fa9872e2c76268f32fc597148cfa14c57b7d13e1edd9b9b6496cdf7de8" )
     endif()
     set( CLANG_FILENAME "${CLANG_DIRNAME}.exe" )
-  else()
+  elseif ( ${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD" )
     if ( 64_BIT_PLATFORM )
-      # We MUST support the latest Ubuntu LTS release!
-      # At the time of writing, that's 14.04. Switch to next LTS ~6 months after
-      # it comes out.
-      set( CLANG_DIRNAME "clang+llvm-${CLANG_VERSION}-x86_64-linux-gnu-ubuntu-14.04" )
+      set( CLANG_DIRNAME "clang+llvm-${CLANG_VERSION}-amd64-unknown-freebsd10" )
       set( CLANG_SHA256
-           "3120c3055ea78bbbb6848510a2af70c68538b990cb0545bac8dad01df8ff69d7" )
+           "df35eaeabec7a474b3c3737c798a0c817795ebbd12952c665c52b2f98abcb6de" )
       set( CLANG_FILENAME "${CLANG_DIRNAME}.tar.xz" )
     else()
-      # Use the prebuilt x86 binaries for Fedora 23.
-      set( CLANG_DIRNAME "clang+llvm-${CLANG_VERSION}-i686-fedora23" )
+      set( CLANG_DIRNAME "clang+llvm-${CLANG_VERSION}-i386-unknown-freebsd10" )
       set( CLANG_SHA256
-           "063a5430b1895a1565831ab0b840cdb14f22ee9fad38e82b9bb8be76e49f1a8b" )
+           "16c612019ece5ba1f846740e77c7c1a39b813acb5bcfbfe9f8af32d7c28caa60" )
+      set( CLANG_FILENAME "${CLANG_DIRNAME}.tar.xz" )
+    endif()
+  else()
+    # Among the prebuilt binaries available upstream, only the Ubuntu 14.04
+    # and openSUSE 13.2 ones are working on Ubuntu 14.04 (and 12.04 which is
+    # required for Travis builds). We choose openSUSE over Ubuntu 14.04 because
+    # it does not have the terminfo library (libtinfo) dependency, which is not
+    # needed for our use case and a source of problems on some distributions
+    # (see YCM issues #778 and #2259), and is available for 32-bit and 64-bit
+    # architectures.
+    if ( 64_BIT_PLATFORM )
+      set( CLANG_DIRNAME "clang+llvm-${CLANG_VERSION}-x86_64-opensuse13.2" )
+      set( CLANG_SHA256
+           "9153b473dc37d2e21a260231e90e43b97aba1dff5d27f14c947815a90fbdc8d7" )
+      set( CLANG_FILENAME "${CLANG_DIRNAME}.tar.xz" )
+    else()
+      set( CLANG_DIRNAME "clang+llvm-${CLANG_VERSION}-i586-opensuse13.2" )
+      set( CLANG_SHA256
+           "92309be874810fb5ca3f9037bb400783be89fa6bc96ed141b04297f59e389692" )
       set( CLANG_FILENAME "${CLANG_DIRNAME}.tar.xz" )
     endif()
   endif()
@@ -193,7 +208,13 @@ if ( APPLE )
 endif()
 
 if ( USE_SYSTEM_BOOST )
-  find_package( Boost REQUIRED COMPONENTS python filesystem system regex thread )
+  set( Boost_COMPONENTS filesystem system regex thread )
+  if( USE_PYTHON2 )
+    list( APPEND Boost_COMPONENTS python )
+  else()
+    list( APPEND Boost_COMPONENTS python3 )
+  endif()
+  find_package( Boost REQUIRED COMPONENTS ${Boost_COMPONENTS} )
 else()
   set( Boost_INCLUDE_DIR ${BoostParts_SOURCE_DIR} )
   set( Boost_LIBRARIES BoostParts )
@@ -312,6 +333,12 @@ endif()
 add_library( ${PROJECT_NAME} SHARED
              ${SERVER_SOURCES}
            )
+
+if ( USE_CLANG_COMPLETER AND NOT LIBCLANG_TARGET )
+     message( FATAL_ERROR "Using Clang completer, but no libclang found. "
+                          "Try setting EXTERNAL_LIBCLANG_PATH or revise "
+                          "your configuration" )
+endif()
 
 target_link_libraries( ${PROJECT_NAME}
                        ${Boost_LIBRARIES}

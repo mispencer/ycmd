@@ -11,14 +11,15 @@ from distutils import sysconfig
 from shutil import rmtree
 from tempfile import mkdtemp
 import errno
-import re
 import multiprocessing
 import os
 import os.path as p
 import platform
+import re
 import shlex
 import subprocess
 import sys
+import traceback
 
 PY_MAJOR, PY_MINOR = sys.version_info[ 0 : 2 ]
 if not ( ( PY_MAJOR == 2 and PY_MINOR >= 6 ) or
@@ -49,12 +50,25 @@ NO_DYNAMIC_PYTHON_ERROR = (
   'before installing a Python version.' )
 NO_PYTHON_LIBRARY_ERROR = 'ERROR: unable to find an appropriate Python library.'
 
-LIBRARY_LDCONFIG_REGEX = re.compile(
-  '(?P<library>\S+) \(.*\) => (?P<path>\S+)' )
-
-
-def OnLinux():
-  return platform.system() == 'Linux'
+# Regular expressions used to find static and dynamic Python libraries.
+# Notes:
+#  - Python 3 library name may have an 'm' suffix on Unix platforms, for
+#    instance libpython3.3m.so;
+#  - the linker name (the soname without the version) does not always
+#    exist so we look for the versioned names too;
+#  - on Windows, the .lib extension is used instead of the .dll one. See
+#    http://xenophilia.org/winvunix.html to understand why.
+STATIC_PYTHON_LIBRARY_REGEX = '^libpython{major}\.{minor}m?\.a$'
+DYNAMIC_PYTHON_LIBRARY_REGEX = """
+  ^(?:
+  # Linux, BSD
+  libpython{major}\.{minor}m?\.so(\.\d+)*|
+  # OS X
+  libpython{major}\.{minor}m?\.dylib|
+  # Windows
+  python{major}{minor}\.lib
+  )$
+"""
 
 
 def OnMac():
@@ -141,108 +155,63 @@ def CheckOutput( *popen_args, **kwargs ):
   return output
 
 
-def GetPythonNameOnUnix():
-  python_name = 'python' + str( PY_MAJOR ) + '.' + str( PY_MINOR )
-  # Python 3 has an 'm' suffix on Unix platforms, for instance libpython3.3m.so.
-  if PY_MAJOR == 3:
-    python_name += 'm'
-  return python_name
-
-
-def GetStandardPythonLocationsOnUnix( name ):
-  library_dir = sysconfig.get_config_var( 'LIBDIR' )
-  include_dir = sysconfig.get_config_var( 'INCLUDEDIR' )
-  return p.join( library_dir, 'lib' + name ), p.join( include_dir, name )
-
-
-def FindPythonLibrariesOnLinux():
-  python_name = GetPythonNameOnUnix()
-  python_library_root, python_include = GetStandardPythonLocationsOnUnix(
-    python_name )
-
-  python_library = python_library_root + '.so'
-  if p.isfile( python_library ):
-    return python_library, python_include
-
-  python_library = python_library_root + '.a'
-  if p.isfile( python_library ):
-    sys.exit( NO_DYNAMIC_PYTHON_ERROR.format( library = python_library,
-                                              flag = '--enable-shared' ) )
-
-  # On some distributions (Ubuntu for instance), the Python system library is
-  # not installed in its default path: /usr/lib. We use the ldconfig tool to
-  # find it.
-  python_library = 'lib' + python_name + '.so'
-  ldconfig_output = CheckOutput( [ 'ldconfig', '-p' ] ).strip().decode( 'utf8' )
-  for line in ldconfig_output.splitlines():
-    match = LIBRARY_LDCONFIG_REGEX.search( line )
-    if match and match.group( 'library' ) == python_library:
-      return match.group( 'path' ), python_include
-
-  sys.exit( NO_PYTHON_LIBRARY_ERROR )
-
-
-def FindPythonLibrariesOnMac():
-  python_name = GetPythonNameOnUnix()
-  python_library_root, python_include = GetStandardPythonLocationsOnUnix(
-    python_name )
-
-  # On MacOS, ycmd does not work with statically linked python library.
-  # It typically manifests with the following error when there is a
-  # self-compiled python without --enable-framework (or, technically
-  # --enable-shared):
-  #
-  #   Fatal Python error: PyThreadState_Get: no current thread
-  #
-  # The most likely explanation for this is that both the ycm_core.so and the
-  # python binary include copies of libpython.a (or whatever included
-  # objects). When the python interpreter starts it initializes only the
-  # globals within its copy, so when ycm_core.so's copy starts executing, it
-  # points at its own copy which is uninitialized.
-  #
-  # Some platforms' dynamic linkers (ld.so) are able to resolve this when
-  # loading shared libraries at runtime[citation needed], but OSX seemingly
-  # cannot.
-  #
-  # So we do 2 things special on OS X:
-  #  - look for a .dylib first
-  #  - if we find a .a, raise an error.
-  python_library = python_library_root + '.dylib'
-  if p.isfile( python_library ):
-    return python_library, python_include
-
-  python_library = python_library_root + '.a'
-  if p.isfile( python_library ):
-    sys.exit( NO_DYNAMIC_PYTHON_ERROR.format( library = python_library,
-                                              flag = '--enable-framework' ) )
-
-  sys.exit( NO_PYTHON_LIBRARY_ERROR )
-
-
-def FindPythonLibrariesOnWindows():
-  python_name = 'python' + str( PY_MAJOR ) + str( PY_MINOR )
-
-  python_include = sysconfig.get_config_var( 'INCLUDEPY' )
-  python_library = p.join(
-    p.dirname( python_include ), 'libs', python_name + '.lib' )
-  if p.isfile( python_library ):
-    return python_library, python_include
-
-  sys.exit( NO_PYTHON_LIBRARY_ERROR )
+def GetPossiblePythonLibraryDirectories():
+  library_dir = p.dirname( sysconfig.get_python_lib( standard_lib = True ) )
+  if OnWindows():
+    return [ p.join( library_dir, 'libs' ) ]
+  # On pyenv, there is no Python dynamic library in the directory returned by
+  # the LIBPL variable. Such library is located in the parent folder of the
+  # standard Python library modules.
+  return [ sysconfig.get_config_var( 'LIBPL' ), library_dir ]
 
 
 def FindPythonLibraries():
-  if OnLinux():
-    return FindPythonLibrariesOnLinux()
+  include_dir = sysconfig.get_python_inc()
+  library_dirs = GetPossiblePythonLibraryDirectories()
 
-  if OnMac():
-    return FindPythonLibrariesOnMac()
+  # Since ycmd is compiled as a dynamic library, we can't link it to a Python
+  # static library. If we try, the following error will occur on Mac:
+  #
+  #   Fatal Python error: PyThreadState_Get: no current thread
+  #
+  # while the error happens during linking on Linux and looks something like:
+  #
+  #   relocation R_X86_64_32 against `a local symbol' can not be used when
+  #   making a shared object; recompile with -fPIC
+  #
+  # On Windows, the Python library is always a dynamic one (an import library to
+  # be exact). To obtain a dynamic library on other platforms, Python must be
+  # compiled with the --enable-shared flag on Linux or the --enable-framework
+  # flag on Mac.
+  #
+  # So we proceed like this:
+  #  - look for a dynamic library and return its path;
+  #  - if a static library is found instead, raise an error with instructions
+  #    on how to build Python as a dynamic library.
+  #  - if no libraries are found, raise a generic error.
+  dynamic_name = re.compile( DYNAMIC_PYTHON_LIBRARY_REGEX.format(
+    major = PY_MAJOR, minor = PY_MINOR ), re.X )
+  static_name = re.compile( STATIC_PYTHON_LIBRARY_REGEX.format(
+    major = PY_MAJOR, minor = PY_MINOR ), re.X )
+  static_libraries = []
 
-  if OnWindows():
-    return FindPythonLibrariesOnWindows()
+  for library_dir in library_dirs:
+    # Files are sorted so that we found the non-versioned Python library before
+    # the versioned one.
+    for filename in sorted( os.listdir( library_dir ) ):
+      if dynamic_name.match( filename ):
+        return p.join( library_dir, filename ), include_dir
 
-  sys.exit( 'ERROR: your platform is not supported by this script. Follow the '
-            'Full Installation Guide instructions in the documentation.' )
+      if static_name.match( filename ):
+        static_libraries.append( p.join( library_dir, filename ) )
+
+  if static_libraries and not OnWindows():
+    dynamic_flag = ( '--enable-framework' if OnMac() else
+                     '--enable-shared' )
+    sys.exit( NO_DYNAMIC_PYTHON_ERROR.format( library = static_libraries[ 0 ],
+                                              flag = dynamic_flag ) )
+
+  sys.exit( NO_PYTHON_LIBRARY_ERROR )
 
 
 def CustomPythonCmakeArgs():
@@ -392,19 +361,30 @@ def BuildYcmdLib( args ):
     full_cmake_args.append( p.join( DIR_OF_THIS_SCRIPT, 'cpp' ) )
 
     os.chdir( build_dir )
-    subprocess.check_call( [ 'cmake' ] + full_cmake_args )
+    try:
+      subprocess.check_call( [ 'cmake' ] + full_cmake_args )
 
-    build_target = ( 'ycm_core' if 'YCM_TESTRUN' not in os.environ else
-                     'ycm_core_tests' )
+      build_target = ( 'ycm_core' if 'YCM_TESTRUN' not in os.environ else
+                       'ycm_core_tests' )
 
-    build_command = [ 'cmake', '--build', '.', '--target', build_target ]
-    if OnWindows():
-      config = 'Debug' if args.enable_debug else 'Release'
-      build_command.extend( [ '--config', config ] )
-    else:
-      build_command.extend( [ '--', '-j', str( NumCores() ) ] )
+      build_command = [ 'cmake', '--build', '.', '--target', build_target ]
+      if OnWindows():
+        config = 'Debug' if args.enable_debug else 'Release'
+        build_command.extend( [ '--config', config ] )
+      else:
+        build_command.extend( [ '--', '-j', str( NumCores() ) ] )
 
-    subprocess.check_call( build_command )
+      subprocess.check_call( build_command )
+    except subprocess.CalledProcessError:
+      traceback.print_exc()
+      sys.exit(
+        '\n\nERROR: The build failed.\n\n'
+        'NOTE: It is *highly* unlikely that this is a bug but rather\n'
+        'that this is a problem with the configuration of your system\n'
+        'or a missing dependency. Please carefully read CONTRIBUTING.md\n'
+        "and if you're sure that it is a bug, please raise an issue on the\n"
+        'issue tracker, including the entire output of this script\n'
+        'and the invocation line used to run it.\n' )
 
     if 'YCM_TESTRUN' in os.environ:
       RunYcmdTests( build_dir )
@@ -541,7 +521,7 @@ def SetUpTern():
   # node_modules of the Tern runtime.  We also want to be able to install our
   # own plugins to improve the user experience for all users.
   #
-  # This is not possible if we use a git submodle for Tern and simply run 'npm
+  # This is not possible if we use a git submodule for Tern and simply run 'npm
   # install' within the submodule source directory, as subsequent 'npm install
   # tern-my-plugin' will (heinously) install another (arbitrary) version of Tern
   # within the Tern source tree (e.g. third_party/tern/node_modules/tern. The
@@ -552,19 +532,7 @@ def SetUpTern():
   # So instead, we have a package.json within our "Tern runtime" directory
   # (third_party/tern_runtime) that defines the packages that we require,
   # including Tern and any plugins which we require as standard.
-  TERN_RUNTIME_DIR = os.path.join( DIR_OF_THIS_SCRIPT,
-                                   'third_party',
-                                   'tern_runtime' )
-  try:
-    os.makedirs( TERN_RUNTIME_DIR )
-  except Exception:
-    # os.makedirs throws if the dir already exists, it also throws if the
-    # permissions prevent creating the directory. There's no way to know the
-    # difference, so we just let the call to os.chdir below throw if this fails
-    # to create the target directory.
-    pass
-
-  os.chdir( TERN_RUNTIME_DIR )
+  os.chdir( p.join( DIR_OF_THIS_SCRIPT, 'third_party', 'tern_runtime' ) )
   subprocess.check_call( [ paths[ 'npm' ], 'install', '--production' ] )
 
 

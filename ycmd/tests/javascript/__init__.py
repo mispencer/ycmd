@@ -25,10 +25,14 @@ from builtins import *  # noqa
 
 import functools
 import os
-import time
 
 from ycmd import handlers
-from ycmd.tests.test_utils import BuildRequest, ClearCompletionsCache, SetUpApp
+from ycmd.tests.test_utils import ( ClearCompletionsCache,
+                                    CurrentWorkingDirectory,
+                                    SetUpApp,
+                                    StopCompleterServer,
+                                    WaitUntilCompleterServerReady )
+from ycmd.utils import GetCurrentDirectory
 
 shared_app = None
 shared_current_dir = None
@@ -39,36 +43,6 @@ def PathToTestFile( *args ):
   return os.path.join( dir_of_current_script, 'testdata', *args )
 
 
-def WaitUntilTernServerReady( app ):
-  app.post_json( '/run_completer_command', BuildRequest(
-    command_arguments = [ 'StartServer' ],
-    completer_target = 'filetype_default',
-    filetype = 'javascript',
-    filepath = '/foo.js',
-    contents = '',
-    line_num = '1'
-  ) )
-
-  retries = 100
-  while retries > 0:
-    result = app.get( '/ready', { 'subserver': 'javascript' } ).json
-    if result:
-      return
-
-    time.sleep( 0.2 )
-    retries = retries - 1
-
-  raise RuntimeError( 'Timeout waiting for Tern.js server to be ready' )
-
-
-def StopTernServer( app ):
-  app.post_json( '/run_completer_command',
-                 BuildRequest( completer_target = 'filetype_default',
-                               command_arguments = [ 'StopServer' ],
-                               filetype = 'javascript' ),
-                 expect_errors = True )
-
-
 def setUpPackage():
   """Initializes the ycmd server as a WebTest application that will be shared
   by all tests using the SharedYcmd decorator in this package. Additional
@@ -77,9 +51,9 @@ def setUpPackage():
   global shared_app, shared_current_dir
 
   shared_app = SetUpApp()
-  shared_current_dir = os.getcwd()
+  shared_current_dir = GetCurrentDirectory()
   os.chdir( PathToTestFile() )
-  WaitUntilTernServerReady( shared_app )
+  WaitUntilCompleterServerReady( shared_app, 'javascript' )
 
 
 def tearDownPackage():
@@ -87,7 +61,7 @@ def tearDownPackage():
   executed once after running all the tests in the package."""
   global shared_app, shared_current_dir
 
-  StopTernServer( shared_app )
+  StopCompleterServer( shared_app, 'javascript' )
   os.chdir( shared_current_dir )
 
 
@@ -116,15 +90,11 @@ def IsolatedYcmd( test ):
   @functools.wraps( test )
   def Wrapper( *args, **kwargs ):
     old_server_state = handlers._server_state
-    old_current_dir = os.getcwd()
-
+    app = SetUpApp()
     try:
-      os.chdir( PathToTestFile() )
-      app = SetUpApp()
-      WaitUntilTernServerReady( app )
-      test( app, *args, **kwargs )
-      StopTernServer( app )
+      with CurrentWorkingDirectory( PathToTestFile() ):
+        test( app, *args, **kwargs )
     finally:
-      os.chdir( old_current_dir )
+      StopCompleterServer( app, 'javascript' )
       handlers._server_state = old_server_state
   return Wrapper
