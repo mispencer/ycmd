@@ -32,7 +32,9 @@ eval "$(pyenv init -)"
 if [ "${YCMD_PYTHON_VERSION}" == "2.6" ]; then
   PYENV_VERSION="2.6.6"
 elif [ "${YCMD_PYTHON_VERSION}" == "2.7" ]; then
-  PYENV_VERSION="2.7.6"
+  # We need a recent enough version of Python 2.7 on OS X or an error occurs
+  # when installing the psutil dependency for our tests.
+  PYENV_VERSION="2.7.8"
 else
   PYENV_VERSION="3.3.6"
 fi
@@ -57,11 +59,10 @@ pip install -U pip wheel setuptools
 pip install -r test_requirements.txt
 npm install -g typescript
 
-# We run coverage tests only on a single build, where COVERAGE=true
-if [ x"${COVERAGE}" = x"true" ]; then
-  pip install coveralls
-fi
-
+# Enable coverage for Python subprocesses. See:
+# http://coverage.readthedocs.org/en/coverage-4.0.3/subprocess.html
+echo -e "import coverage\ncoverage.process_startup()" > \
+  ${PYENV_ROOT}/versions/${PYENV_VERSION}/lib/python${YCMD_PYTHON_VERSION}/site-packages/sitecustomize.py
 
 ############
 # rust setup

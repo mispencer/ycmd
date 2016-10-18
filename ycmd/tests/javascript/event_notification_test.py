@@ -27,17 +27,19 @@ from hamcrest import assert_that, empty
 from mock import patch
 from nose.tools import eq_
 from pprint import pformat
-import http.client
+import requests
 import os
 
-from ycmd.tests.test_utils import BuildRequest, ErrorMatcher
-from ycmd.tests.javascript import ( IsolatedYcmd, PathToTestFile,
-                                    WaitUntilTernServerReady )
-from ycmd.utils import ReadFile
+from ycmd.tests.test_utils import ( BuildRequest, ErrorMatcher,
+                                    WaitUntilCompleterServerReady )
+from ycmd.tests.javascript import IsolatedYcmd, PathToTestFile
+from ycmd.utils import GetCurrentDirectory, ReadFile
 
 
 @IsolatedYcmd
 def EventNotification_OnFileReadyToParse_ProjectFile_cwd_test( app ):
+  WaitUntilCompleterServerReady( app, 'javascript' )
+
   contents = ReadFile( PathToTestFile( 'simple_test.js' ) )
 
   response = app.post_json( '/event_notification',
@@ -47,12 +49,14 @@ def EventNotification_OnFileReadyToParse_ProjectFile_cwd_test( app ):
                               filetype = 'javascript' ),
                             expect_errors = True)
 
-  eq_( response.status_code, http.client.OK )
+  eq_( response.status_code, requests.codes.ok )
   assert_that( response.json, empty() )
 
 
 @IsolatedYcmd
 def EventNotification_OnFileReadyToParse_ProjectFile_parentdir_test( app ):
+  WaitUntilCompleterServerReady( app, 'javascript' )
+
   os.chdir( PathToTestFile( 'lamelib' ) )
   contents = ReadFile( PathToTestFile( 'simple_test.js' ) )
 
@@ -63,7 +67,7 @@ def EventNotification_OnFileReadyToParse_ProjectFile_parentdir_test( app ):
                               filetype = 'javascript' ),
                             expect_errors = True)
 
-  eq_( response.status_code, http.client.OK )
+  eq_( response.status_code, requests.codes.ok )
   assert_that( response.json, empty() )
 
 
@@ -71,6 +75,8 @@ def EventNotification_OnFileReadyToParse_ProjectFile_parentdir_test( app ):
 @patch( 'ycmd.completers.javascript.tern_completer.GlobalConfigExists',
         return_value = False )
 def EventNotification_OnFileReadyToParse_NoProjectFile_test( app, *args ):
+  WaitUntilCompleterServerReady( app, 'javascript' )
+
   # We raise an error if we can't detect a .tern-project file.
   # We only do this on the first OnFileReadyToParse event after a
   # server startup.
@@ -86,13 +92,13 @@ def EventNotification_OnFileReadyToParse_NoProjectFile_test( app, *args ):
 
   print( 'event response: {0}'.format( pformat( response.json ) ) )
 
-  eq_( response.status_code, http.client.INTERNAL_SERVER_ERROR )
+  eq_( response.status_code, requests.codes.internal_server_error )
 
   assert_that(
     response.json,
     ErrorMatcher( RuntimeError,
                   'Warning: Unable to detect a .tern-project file '
-                  'in the hierarchy before ' + os.getcwd() +
+                  'in the hierarchy before ' + GetCurrentDirectory() +
                   ' and no global .tern-config file was found. '
                   'This is required for accurate JavaScript '
                   'completion. Please see the User Guide for '
@@ -110,23 +116,18 @@ def EventNotification_OnFileReadyToParse_NoProjectFile_test( app, *args ):
 
   print( 'event response: {0}'.format( pformat( response.json ) ) )
 
-  eq_( response.status_code, http.client.OK )
+  eq_( response.status_code, requests.codes.ok )
   assert_that( response.json, empty() )
 
   # Restart the server and check that it raises it again
 
   app.post_json( '/run_completer_command',
-                 BuildRequest( command_arguments = [ 'StopServer' ],
-                               filetype = 'javascript',
-                               contents = contents,
-                               completer_target = 'filetype_default' ) )
-  app.post_json( '/run_completer_command',
-                 BuildRequest( command_arguments = [ 'StartServer' ],
+                 BuildRequest( command_arguments = [ 'RestartServer' ],
                                filetype = 'javascript',
                                contents = contents,
                                completer_target = 'filetype_default' ) )
 
-  WaitUntilTernServerReady( app )
+  WaitUntilCompleterServerReady( app, 'javascript' )
 
   response = app.post_json( '/event_notification',
                             BuildRequest( event_name = 'FileReadyToParse',
@@ -136,13 +137,13 @@ def EventNotification_OnFileReadyToParse_NoProjectFile_test( app, *args ):
 
   print( 'event response: {0}'.format( pformat( response.json ) ) )
 
-  eq_( response.status_code, http.client.INTERNAL_SERVER_ERROR )
+  eq_( response.status_code, requests.codes.internal_server_error )
 
   assert_that(
     response.json,
     ErrorMatcher( RuntimeError,
                   'Warning: Unable to detect a .tern-project file '
-                  'in the hierarchy before ' + os.getcwd() +
+                  'in the hierarchy before ' + GetCurrentDirectory() +
                   ' and no global .tern-config file was found. '
                   'This is required for accurate JavaScript '
                   'completion. Please see the User Guide for '
@@ -154,6 +155,8 @@ def EventNotification_OnFileReadyToParse_NoProjectFile_test( app, *args ):
 @patch( 'ycmd.completers.javascript.tern_completer.GlobalConfigExists',
         return_value = True )
 def EventNotification_OnFileReadyToParse_UseGlobalConfig_test( app, *args ):
+  WaitUntilCompleterServerReady( app, 'javascript' )
+
   os.chdir( PathToTestFile( '..' ) )
   contents = ReadFile( PathToTestFile( 'simple_test.js' ) )
 
@@ -165,4 +168,4 @@ def EventNotification_OnFileReadyToParse_UseGlobalConfig_test( app, *args ):
 
   print( 'event response: {0}'.format( pformat( response.json ) ) )
 
-  eq_( response.status_code, http.client.OK )
+  eq_( response.status_code, requests.codes.ok )

@@ -26,7 +26,7 @@ from future.utils import iteritems
 standard_library.install_aliases()
 from builtins import *  # noqa
 
-from future.utils import itervalues, PY2
+from future.utils import PY2
 from hamcrest import contains_string, has_entry, has_entries, assert_that
 from mock import patch
 from webtest import TestApp
@@ -34,11 +34,15 @@ import bottle
 import contextlib
 import nose
 import functools
+import os
+import tempfile
+import time
+import stat
 
 from ycmd import handlers, user_options_store
 from ycmd.completers.completer import Completer
 from ycmd.responses import BuildCompletionData
-from ycmd.utils import OnMac, OnWindows, ToUnicode
+from ycmd.utils import GetCurrentDirectory, OnMac, OnWindows, ToUnicode
 import ycm_core
 
 try:
@@ -52,6 +56,7 @@ WindowsOnly = skipIf( not OnWindows(), 'Windows only' )
 ClangOnly = skipIf( not ycm_core.HasClangSupport(),
                     'Only when Clang support available' )
 MacOnly = skipIf( not OnMac(), 'Mac only' )
+UnixOnly = skipIf( OnWindows(), 'Unix only' )
 
 
 def BuildRequest( **kwargs ):
@@ -136,6 +141,13 @@ def ChunkMatcher( replacement_text, start, end ):
   } )
 
 
+def LineColMatcher( line, col ):
+  return has_entries( {
+    'line_num': line,
+    'column_num': col
+  } )
+
+
 @contextlib.contextmanager
 def PatchCompleter( completer, filetype ):
   user_options = handlers._server_state._user_options
@@ -151,15 +163,65 @@ def UserOption( key, value ):
     user_options = current_options.copy()
     user_options.update( { key: value } )
     handlers.UpdateUserOptions( user_options )
-    yield
+    yield user_options
   finally:
     handlers.UpdateUserOptions( current_options )
+
+
+@contextlib.contextmanager
+def CurrentWorkingDirectory( path ):
+  old_cwd = GetCurrentDirectory()
+  os.chdir( path )
+  try:
+    yield old_cwd
+  finally:
+    os.chdir( old_cwd )
+
+
+# The "exe" suffix is needed on Windows and not harmful on other platforms.
+@contextlib.contextmanager
+def TemporaryExecutable( extension = '.exe' ):
+  with tempfile.NamedTemporaryFile( prefix = 'Temp',
+                                    suffix = extension ) as executable:
+    os.chmod( executable.name, stat.S_IXUSR )
+    yield executable.name
 
 
 def SetUpApp():
   bottle.debug( True )
   handlers.SetServerStateToDefaults()
   return TestApp( handlers.app )
+
+
+def StartCompleterServer( app, filetype, filepath = '/foo' ):
+  app.post_json( '/run_completer_command',
+                 BuildRequest( command_arguments = [ 'RestartServer' ],
+                               filetype = filetype,
+                               filepath = filepath ) )
+
+
+def StopCompleterServer( app, filetype, filepath = '/foo' ):
+  app.post_json( '/run_completer_command',
+                 BuildRequest( command_arguments = [ 'StopServer' ],
+                               filetype = filetype,
+                               filepath = filepath ),
+                 expect_errors = True )
+
+
+def WaitUntilCompleterServerReady( app, filetype ):
+  retries = 100
+
+  while retries > 0:
+    result = app.get( '/ready', { 'subserver': filetype } ).json
+    if result:
+      return
+
+    time.sleep( 0.2 )
+    retries = retries - 1
+
+  raise RuntimeError(
+    'Timeout waiting for "{0}" filetype completer'.format( filetype ) )
+
 
 
 def ClearCompletionsCache():
@@ -170,10 +232,8 @@ def ClearCompletionsCache():
   This function is used when sharing the application between tests so that
   no completions are cached by previous tests."""
   server_state = handlers._server_state
-  filetype_completers = server_state._filetype_completers
-  for completer in itervalues( filetype_completers ):
-    if completer:
-      completer._completions_cache.Invalidate()
+  for completer in server_state.GetLoadedFiletypeCompleters():
+    completer._completions_cache.Invalidate()
   general_completer = server_state.GetGeneralCompleter()
   for completer in general_completer._all_completers:
     completer._completions_cache.Invalidate()

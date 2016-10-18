@@ -39,11 +39,19 @@ INCLUDE_FLAGS = [ '-isystem', '-I', '-iquote', '-isysroot', '--sysroot',
 
 # We need to remove --fcolor-diagnostics because it will cause shell escape
 # sequences to show up in editors, which is bad. See Valloric/YouCompleteMe#1421
-STATE_FLAGS_TO_SKIP = set(['-c', '-MP', '--fcolor-diagnostics'])
+STATE_FLAGS_TO_SKIP = set( [ '-c',
+                             '-MP',
+                             '-MD',
+                             '-MMD',
+                             '--fcolor-diagnostics' ] )
 
 # The -M* flags spec:
 #   https://gcc.gnu.org/onlinedocs/gcc-4.9.0/gcc/Preprocessor-Options.html
-FILE_FLAGS_TO_SKIP = set(['-MD', '-MMD', '-MF', '-MT', '-MQ', '-o'])
+FILE_FLAGS_TO_SKIP = set( [ '-MF',
+                            '-MT',
+                            '-MQ',
+                            '-o',
+                            '--serialize-diagnostics' ] )
 
 # Use a regex to correctly detect c++/c language for both versioned and
 # non-versioned compiler executable names suffixes
@@ -91,9 +99,12 @@ class Flags( object ):
 
       if add_extra_clang_flags:
         flags += self.extra_clang_flags
-      sanitized_flags = PrepareFlagsForClang( flags, filename )
 
-      if results[ 'do_cache' ]:
+      sanitized_flags = PrepareFlagsForClang( flags,
+                                              filename,
+                                              add_extra_clang_flags )
+
+      if results.get( 'do_cache', True ):
         self.flags_for_file[ filename ] = sanitized_flags
       return sanitized_flags
 
@@ -164,10 +175,12 @@ def _CallExtraConfFlagsForFile( module, filename, client_data ):
     return module.FlagsForFile( filename )
 
 
-def PrepareFlagsForClang( flags, filename ):
-  flags = _CompilerToLanguageFlag( flags )
+def PrepareFlagsForClang( flags, filename, add_extra_clang_flags = True ):
+  flags = _AddLanguageFlagWhenAppropriate( flags )
   flags = _RemoveXclangFlags( flags )
   flags = _RemoveUnusedFlags( flags, filename )
+  if add_extra_clang_flags:
+    flags = _EnableTypoCorrection( flags )
   flags = _SanitizeFlags( flags )
   return flags
 
@@ -227,22 +240,24 @@ def _RemoveFlagsPrecedingCompiler( flags ):
   return flags[ :-1 ]
 
 
-def _CompilerToLanguageFlag( flags ):
-  """When flags come from the compile_commands.json file, the flag preceding
-  the first flag starting with a dash is usually the path to the compiler that
-  should be invoked.  We want to replace it with a corresponding language flag.
-  E.g., -x c for gcc and -x c++ for g++."""
+def _AddLanguageFlagWhenAppropriate( flags ):
+  """When flags come from the compile_commands.json file, the flag preceding the
+  first flag starting with a dash is usually the path to the compiler that
+  should be invoked. Since LibClang does not deduce the language from the
+  compiler name, we explicitely set the language to C++ if the compiler is a C++
+  one (g++, clang++, etc.). Otherwise, we let LibClang guess the language from
+  the file extension. This handles the case where the .h extension is used for
+  C++ headers."""
 
   flags = _RemoveFlagsPrecedingCompiler( flags )
 
-  # First flag is now the compiler path or a flag starting with a dash
-  if flags[ 0 ].startswith( '-' ):
-    return flags
+  # First flag is now the compiler path or a flag starting with a dash.
+  first_flag = flags[ 0 ]
 
-  language = ( 'c++' if CPP_COMPILER_REGEX.search( flags[ 0 ] ) else
-               'c' )
-
-  return flags[ :1 ] + [ '-x', language ] + flags[ 1: ]
+  if ( not first_flag.startswith( '-' ) and
+       CPP_COMPILER_REGEX.search( first_flag ) ):
+    return [ first_flag, '-x', 'c++' ] + flags[ 1: ]
+  return flags
 
 
 def _RemoveUnusedFlags( flags, filename ):
@@ -266,9 +281,11 @@ def _RemoveUnusedFlags( flags, filename ):
   previous_flag_is_include = False
   previous_flag_starts_with_dash = False
   current_flag_starts_with_dash = False
+
   for flag in flags:
     previous_flag_starts_with_dash = current_flag_starts_with_dash
     current_flag_starts_with_dash = flag.startswith( '-' )
+
     if skip_next:
       skip_next = False
       continue
@@ -362,13 +379,20 @@ if OnMac():
   # a Mac because if we don't, libclang would fail to find <vector> etc.  This
   # should be fixed upstream in libclang, but until it does, we need to help
   # users out.
-  # See Valloric/YouCompleteMe#303 for details.
+  # See the following for details:
+  #  - Valloric/YouCompleteMe#303
+  #  - Valloric/YouCompleteMe#2268
   MAC_INCLUDE_PATHS = (
     _PathsForAllMacToolchains( 'usr/include/c++/v1' ) +
     [ '/usr/local/include' ] +
     _PathsForAllMacToolchains( 'usr/include' ) +
     [ '/usr/include', '/System/Library/Frameworks', '/Library/Frameworks' ] +
-    _LatestMacClangIncludes()
+    _LatestMacClangIncludes() +
+    # We include the MacOS platform SDK because some meaningful parts of the
+    # standard library are located there. If users are compiling for (say)
+    # iPhone.platform, etc. they should appear earlier in the include path.
+    [ '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/'
+      'Developer/SDKs/MacOSX.sdk/usr/include' ]
   )
 
 
@@ -377,9 +401,9 @@ def _ExtraClangFlags():
   if OnMac():
     for path in MAC_INCLUDE_PATHS:
       flags.extend( [ '-isystem', path ] )
-  # On Windows, parsing of templates is delayed until instantation time.
-  # This makes GetType and GetParent commands not returning the expected
-  # result when the cursor is in templates.
+  # On Windows, parsing of templates is delayed until instantiation time.
+  # This makes GetType and GetParent commands fail to return the expected
+  # result when the cursor is in a template.
   # Using the -fno-delayed-template-parsing flag disables this behavior.
   # See
   # http://clang.llvm.org/extra/PassByValueTransform.html#note-about-delayed-template-parsing # noqa
@@ -388,6 +412,24 @@ def _ExtraClangFlags():
   # for a similar issue.
   if OnWindows():
     flags.append( '-fno-delayed-template-parsing' )
+  return flags
+
+
+def _EnableTypoCorrection( flags ):
+  """Adds the -fspell-checking flag if the -fno-spell-checking flag is not
+  present"""
+
+  # "Typo correction" (aka spell checking) in clang allows it to produce
+  # hints (in the form of fix-its) in the case of certain diagnostics. A common
+  # example is "no type named 'strng' in namespace 'std'; Did you mean
+  # 'string'? (FixIt)". This is enabled by default in the clang driver (i.e. the
+  # 'clang' binary), but is not when using libclang (as we do). It's a useful
+  # enough feature that we just always turn it on unless the user explicitly
+  # turned it off in their flags (with -fno-spell-checking).
+  if '-fno-spell-checking' in flags:
+    return flags
+
+  flags.append( '-fspell-checking' )
   return flags
 
 

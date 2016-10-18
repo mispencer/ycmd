@@ -27,8 +27,6 @@ from future.utils import itervalues
 
 from collections import defaultdict
 import os
-import errno
-import time
 import re
 from ycmd.completers.completer import Completer
 from ycmd.utils import ( ForceSemanticCompletion, CodepointOffsetToByteOffset,
@@ -36,30 +34,28 @@ from ycmd.utils import ( ForceSemanticCompletion, CodepointOffsetToByteOffset,
 from ycmd import responses
 from ycmd import utils
 from ycmd.completers.completer_utils import GetFileContents
-from requests import ( Session )
+import requests
 import urllib.parse
 import logging
 from . import solutiondetection
 import threading
-import traceback
-from subprocess import ( PIPE )
 
 SERVER_NOT_FOUND_MSG = ( 'OmniSharp server binary not found at {0}. ' +
                          'Did you compile it? You can do so by running ' +
                          '"./install.py --omnisharp-completer".' )
 INVALID_FILE_MESSAGE = 'File is invalid.'
 NO_DIAGNOSTIC_MESSAGE = 'No diagnostic for current line!'
-PATH_TO_LEGACY_OMNISHARP_BINARY = os.path.join(
-  os.path.abspath( os.path.dirname( __file__ ) ),
-  '..', '..', '..', 'third_party', 'OmniSharpServer',
-  'OmniSharp', 'bin', 'Release', 'OmniSharp.exe' )
+PATH_TO_LEGACY_OMNISHARP_BINARY = os.path.abspath(
+  os.path.join( os.path.dirname( __file__ ), '..', '..', '..',
+                'third_party', 'OmniSharpServer', 'OmniSharp',
+                'bin', 'Release', 'OmniSharp.exe' ) )
 ROSLYN_OMNISHARP_BINARY = 'OmniSharp'
 if utils.OnWindows() or utils.OnCygwin():
   ROSLYN_OMNISHARP_BINARY = 'Omnisharp.exe'
-PATH_TO_ROSLYN_OMNISHARP_BINARY = os.path.join(
-  os.path.abspath( os.path.dirname( __file__ ) ),
-  '..', '..', '..', 'third_party', 'omnisharp-roslyn', ROSLYN_OMNISHARP_BINARY
-)
+PATH_TO_ROSLYN_OMNISHARP_BINARY = os.path.abspath(
+  os.path.join( os.path.dirname( __file__ ), '..', '..', '..',
+                'third_party', 'omnisharp-roslyn',
+                ROSLYN_OMNISHARP_BINARY ) )
 
 
 class CsharpCompleter( Completer ):
@@ -83,9 +79,8 @@ class CsharpCompleter( Completer ):
            SERVER_NOT_FOUND_MSG.format( self._omnisharp_path ) )
 
 
-
   def Shutdown( self ):
-    if ( self.user_options[ 'auto_stop_csharp_server' ] ):
+    if self.user_options[ 'auto_stop_csharp_server' ]:
       for solutioncompleter in itervalues( self._completer_per_solution ):
         solutioncompleter._StopServer()
 
@@ -103,9 +98,11 @@ class CsharpCompleter( Completer ):
 
     with self._solution_state_lock:
       if solution not in self._completer_per_solution:
+        keep_logfiles = self.user_options[ 'server_keep_logfiles' ]
         desired_omnisharp_port = self.user_options.get( 'csharp_server_port' )
         completer = CsharpSolutionCompleter( self._omnisharp_path,
                                              solution,
+                                             keep_logfiles,
                                              desired_omnisharp_port )
         self._completer_per_solution[ solution ] = completer
 
@@ -145,10 +142,6 @@ class CsharpCompleter( Completer ):
 
   def GetSubcommandsMap( self ):
     return {
-      'StartServer'                      : ( lambda self, request_data, args:
-         self._SolutionSubcommand( request_data,
-                                   method = '_StartServer',
-                                   no_request_data = True ) ),
       'StopServer'                       : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_StopServer',
@@ -209,12 +202,12 @@ class CsharpCompleter( Completer ):
                                    no_request_data = True ) ),
       'SetOmnisharpPath'                 : ( lambda self, request_data, args:
          self._SetOmnisharpPath( request_data, args[ 0 ] ) ),
-      'UseLegacyOmnisharp'                 : ( lambda self, request_data, args:
+      'UseLegacyOmnisharp'               : ( lambda self, request_data, args:
          self._SetOmnisharpPath( request_data,
                                  PATH_TO_LEGACY_OMNISHARP_BINARY ) ),
-      'UseRoslynOmnisharp'                 : ( lambda self, request_data, args:
+      'UseRoslynOmnisharp'               : ( lambda self, request_data, args:
          self._SetOmnisharpPath( request_data,
-                                 PATH_TO_ROSLYN_OMNISHARP_BINARY ) ),
+                                 PATH_TO_ROSLYN_OMNISHARP_BINARY ) )
     }
 
 
@@ -232,7 +225,7 @@ class CsharpCompleter( Completer ):
     # Only start the server associated to this solution if the option to
     # automatically start one is set and no server process is already running.
     if ( self.user_options[ 'auto_start_csharp_server' ]
-         and not solutioncompleter.ServerIsRunning() ):
+         and not solutioncompleter._ServerIsRunning() ):
       solutioncompleter._StartServer()
       return
 
@@ -254,16 +247,24 @@ class CsharpCompleter( Completer ):
 
   def _QuickFixToDiagnostic( self, request_data, quick_fix ):
     filename = _ConvertFilenameForCygwin( quick_fix[ "FileName" ], False )
+    # NOTE: end of diagnostic range returned by the OmniSharp server is not
+    # included.
     location = _BuildLocation( request_data,
                                filename,
                                quick_fix[ 'Line' ],
                                quick_fix[ 'Column' ] )
-    location_range = responses.Range( location, location )
+    location_end = _BuildLocation( request_data,
+                                   filename,
+                                   quick_fix[ 'EndLine' ],
+                                   quick_fix[ 'EndColumn' ] )
+    if not location_end:
+      location_end = location
+    location_extent = responses.Range( location, location_end )
     return responses.Diagnostic( list(),
                                  location,
-                                 location_range,
-                                 quick_fix[ "Text" ],
-                                 quick_fix[ "LogLevel" ].upper() )
+                                 location_extent,
+                                 quick_fix[ 'Text' ],
+                                 quick_fix[ 'LogLevel' ].upper() )
 
 
   def GetDetailedDiagnostic( self, request_data ):
@@ -295,13 +296,50 @@ class CsharpCompleter( Completer ):
 
 
   def DebugInfo( self, request_data ):
-    solutioncompleter = self._GetSolutionCompleter( request_data )
-    if solutioncompleter.ServerIsRunning():
-      return 'OmniSharp Server running at: {0}\n{1}'.format(
-                   solutioncompleter._ServerLocation(),
-                   solutioncompleter.DebugInfo( request_data ) )
-    else:
-      return 'OmniSharp Server is not running'
+    try:
+      completer = self._GetSolutionCompleter( request_data )
+    except RuntimeError:
+      return (
+        'C# completer debug information:\n'
+        '  OmniSharp not running\n'
+        '  OmniSharp executable: {0}\n'
+        '  OmniSharp solution: not found'.format( PATH_TO_OMNISHARP_BINARY ) )
+
+    with completer._server_state_lock:
+      if completer._ServerIsRunning():
+        return (
+          'C# completer debug information:\n'
+          '  OmniSharp running at: {0}\n'
+          '  OmniSharp process ID: {1}\n'
+          '  OmniSharp executable: {2}\n'
+          '  OmniSharp logfiles:\n'
+          '    {3}\n'
+          '    {4}\n'
+          '  OmniSharp solution: {5}'.format( completer._ServerLocation(),
+                                              completer._omnisharp_phandle.pid,
+                                              PATH_TO_OMNISHARP_BINARY,
+                                              completer._filename_stdout,
+                                              completer._filename_stderr,
+                                              completer._solution_path ) )
+
+      if completer._filename_stdout and completer._filename_stderr:
+        return (
+          'C# completer debug information:\n'
+          '  OmniSharp no longer running\n'
+          '  OmniSharp executable: {0}\n'
+          '  OmniSharp logfiles:\n'
+          '    {1}\n'
+          '    {2}\n'
+          '  OmniSharp solution: {3}'.format( PATH_TO_OMNISHARP_BINARY,
+                                              completer._filename_stdout,
+                                              completer._filename_stderr,
+                                              completer._solution_path ) )
+
+      return ( 'C# completer debug information:\n'
+               '  OmniSharp is not running\n'
+               '  OmniSharp executable: {0}\n'
+               '  OmniSharp solution: {1}'.format( PATH_TO_OMNISHARP_BINARY,
+                                                   completer._solution_path ) )
 
 
   def ServerIsHealthy( self ):
@@ -317,7 +355,7 @@ class CsharpCompleter( Completer ):
   def _CheckAllRunning( self, action ):
     solutioncompleters = itervalues( self._completer_per_solution )
     return all( action( completer ) for completer in solutioncompleters
-                if completer.ServerIsRunning() )
+                if completer._ServerIsRunning() )
 
 
   def _SetOmnisharpPath( self, request_data, omnisharp_path ):
@@ -341,22 +379,24 @@ class CsharpCompleter( Completer ):
       # to be confirmed
       path_to_solutionfile = solutiondetection.FindSolutionPath( filepath )
       if not path_to_solutionfile:
-          raise RuntimeError( 'Autodetection of solution file failed. \n' )
+        raise RuntimeError( 'Autodetection of solution file failed.' )
       self._solution_for_file[ filepath ] = path_to_solutionfile
 
     return self._solution_for_file[ filepath ]
 
 
 class CsharpSolutionCompleter( object ):
-  def __init__( self, omnisharp_path, solution_path, desired_omnisharp_port ):
+  def __init__( self, omnisharp_path, solution_path, keep_logfiles, desired_omnisharp_port ):
     self._logger = logging.getLogger( __name__ )
     self._omnisharp_path = omnisharp_path
     self._solution_path = solution_path
+    self._keep_logfiles = keep_logfiles
+    self._filename_stderr = None
+    self._filename_stdout = None
     self._omnisharp_port = None
     self._omnisharp_phandle = None
     self._desired_omnisharp_port = desired_omnisharp_port
     self._server_state_lock = threading.RLock()
-    self._session = None
 
 
   def CodeCheck( self, request_data ):
@@ -372,7 +412,7 @@ class CsharpSolutionCompleter( object ):
     """ Start the OmniSharp server if not already running. Use a lock to avoid
     starting the server multiple times for the same solution. """
     with self._server_state_lock:
-      if self.ServerIsRunning():
+      if self._ServerIsRunning():
         return
 
       self._logger.info( 'Starting OmniSharp server' )
@@ -396,85 +436,57 @@ class CsharpSolutionCompleter( object ):
 
       self._logger.info( 'Starting OmniSharp server with: ' + str( command ) )
 
-      self._omnisharp_phandle = utils.SafePopen(
-          command, stdout = PIPE, stderr = PIPE )
-      for target in [
-        self._GenerateOutLoop( self._omnisharp_phandle.stdout, "O" ),
-        self._GenerateOutLoop( self._omnisharp_phandle.stderr, "E" )
-      ]:
-        threading.Thread( target = target ).start()
+      filename_format = os.path.join( utils.PathToCreatedTempDir(),
+                                      u'omnisharp_{port}_{sln}_{std}.log' )
 
-      self._logger.info( 'Starting OmniSharp server' )
+      solutionfile = os.path.basename( path_to_solutionfile )
+      self._filename_stdout = filename_format.format(
+          port = self._omnisharp_port, sln = solutionfile, std = 'stdout' )
+      self._filename_stderr = filename_format.format(
+          port = self._omnisharp_port, sln = solutionfile, std = 'stderr' )
 
+      with utils.OpenForStdHandle( self._filename_stderr ) as fstderr:
+        with utils.OpenForStdHandle( self._filename_stdout ) as fstdout:
+          self._omnisharp_phandle = utils.SafePopen(
+              command, stdout = fstdout, stderr = fstderr )
 
-  def _GenerateOutLoop( self, stream, type ):
-    def out_loop():
-      try:
-        data = ""
-        while not stream.closed and self._omnisharp_phandle is not None:
-          new_data = os.read( stream.fileno(), 1024 * 1024 * 10 )
-          if not new_data:
-            time.sleep( .1 )
-          data += ToUnicode( new_data )
-          while "\n" in data:
-            ( line, data ) = data.split( "\n", 1 )
-            self._logger.info( "Omnisharp " + type + ": " + line.rstrip() )
-      except Exception:
-        self._logger.error( "Read error: " + traceback.format_exc() )
-
-    return out_loop
+      self._solution_path = path_to_solutionfile
 
 
   def _StopServer( self ):
     """ Stop the OmniSharp server using a lock. """
     with self._server_state_lock:
-      self._logger.info( 'Stopping OmniSharp server' )
-      self._TryToStopServer()
-      self._ForceStopServer()
-      self._CleanupAfterServerStop()
-      self._logger.info( 'Stopped OmniSharp server' )
+      if self._ServerIsRunning():
+        self._logger.info( 'Stopping OmniSharp server with PID {0}'.format(
+                               self._omnisharp_phandle.pid ) )
+        self._GetResponse( '/stopserver' )
+        try:
+          utils.WaitUntilProcessIsTerminated( self._omnisharp_phandle,
+                                              timeout = 5 )
+          self._logger.info( 'OmniSharp server stopped' )
+        except RuntimeError:
+          self._logger.exception( 'Error while stopping OmniSharp server' )
+
+      self._CleanUp()
 
 
-  def _TryToStopServer( self ):
-    for _ in range( 5 ):
-      try:
-        self._GetResponse( '/stopserver', timeout = .5 )
-      except:
-        pass
-      for _ in range( 10 ):
-        if not self.ServerIsRunning():
-          return
-        time.sleep( .1 )
-
-
-  def _ForceStopServer( self ):
-    # Kill it if it's still up
-    phandle = self._omnisharp_phandle
-    if phandle is not None:
-      self._logger.info( 'Killing OmniSharp server' )
-      for stream in [ phandle.stderr, phandle.stdout ]:
-        if stream is not None:
-          stream.close()
-      try:
-        phandle.kill()
-      except OSError as e:
-        if e.errno == errno.ESRCH: # No such process
-          pass
-        else:
-          raise
-
-
-  def _CleanupAfterServerStop( self ):
+  def _CleanUp( self ):
     self._omnisharp_port = None
     self._omnisharp_phandle = None
-    self._session = None
+    if not self._keep_logfiles:
+      if self._filename_stdout:
+        utils.RemoveIfExists( self._filename_stdout )
+        self._filename_stdout = None
+      if self._filename_stderr:
+        utils.RemoveIfExists( self._filename_stderr )
+        self._filename_stderr = None
 
 
   def _RestartServer( self ):
     """ Restarts the OmniSharp server using a lock. """
     with self._server_state_lock:
       self._StopServer()
-      return self._StartServer()
+      self._StartServer()
 
 
   def _ReloadSolution( self ):
@@ -598,14 +610,14 @@ class CsharpSolutionCompleter( object ):
     return parameters
 
 
-  def ServerIsRunning( self ):
+  def _ServerIsRunning( self ):
     """ Check if our OmniSharp server is running (process is up)."""
     return utils.ProcessIsRunning( self._omnisharp_phandle )
 
 
   def ServerIsHealthy( self ):
     """ Check if our OmniSharp server is healthy (up and serving)."""
-    if not self.ServerIsRunning():
+    if not self._ServerIsRunning():
       return False
 
     try:
@@ -616,7 +628,7 @@ class CsharpSolutionCompleter( object ):
 
   def ServerIsReady( self ):
     """ Check if our OmniSharp server is ready (loaded solution file)."""
-    if not self.ServerIsRunning():
+    if not self._ServerIsRunning():
       return False
 
     try:
@@ -639,13 +651,7 @@ class CsharpSolutionCompleter( object ):
   def _GetResponse( self, handler, parameters = {}, timeout = None ):
     """ Handle communication with server """
     target = urllib.parse.urljoin( self._ServerLocation(), handler )
-    if self._session is None:
-      self._session = Session()
-    self._logger.info( u'Sending request' )
-    response = self._session.post( target,
-                                   json = parameters,
-                                   timeout = timeout )
-    self._logger.info( u'Received response request' )
+    response = requests.post( target, json = parameters, timeout = timeout )
     return response.json()
 
 
@@ -658,9 +664,12 @@ class CsharpSolutionCompleter( object ):
     self._logger.info( u'using port {0}'.format( self._omnisharp_port ) )
 
 
-  def DebugInfo( self, request_data ):
-    """ Get debug info."""
-    return "Omnisharp logs: included in ycmd logs"
+  def _SetOmnisharpPath( self, request_data, omnisharp_path ):
+    self._omnisharp_path = omnisharp_path
+
+    if not os.path.isfile( self._omnisharp_path ):
+      raise RuntimeError(
+           SERVER_NOT_FOUND_MSG.format( self._omnisharp_path ) )
 
 
 def _CompleteIsFromImport( candidate ):
@@ -743,6 +752,8 @@ def _IndexToLineColumn( text, index ):
 
 
 def _BuildLocation( request_data, filename, line_num, column_num ):
+  if line_num <= 0 or column_num <= 0:
+    return None
   contents = utils.SplitLines( GetFileContents( request_data, filename ) )
   line_value = contents[ line_num - 1 ]
   return responses.Location(

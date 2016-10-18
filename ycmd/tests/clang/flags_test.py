@@ -28,12 +28,13 @@ from ycmd.completers.cpp import flags
 from mock import patch, Mock
 from ycmd.tests.test_utils import MacOnly
 
+from hamcrest import assert_that, contains
+
 
 @patch( 'ycmd.extra_conf_store.ModuleForSourceFile', return_value = Mock() )
 def FlagsForFile_BadNonUnicodeFlagsAreAlsoRemoved_test( *args ):
   fake_flags = {
-    'flags': [ bytes( b'-c' ), '-c', bytes( b'-foo' ), '-bar' ],
-    'do_cache': True
+    'flags': [ bytes( b'-c' ), '-c', bytes( b'-foo' ), '-bar' ]
   }
 
   with patch( 'ycmd.completers.cpp.flags._CallExtraConfFlagsForFile',
@@ -41,6 +42,63 @@ def FlagsForFile_BadNonUnicodeFlagsAreAlsoRemoved_test( *args ):
     flags_object = flags.Flags()
     flags_list = flags_object.FlagsForFile( '/foo', False )
     eq_( list( flags_list ), [ '-foo', '-bar' ] )
+
+
+@patch( 'ycmd.extra_conf_store.ModuleForSourceFile', return_value = Mock() )
+def FlagsForFile_FlagsCachedByDefault_test( *args ):
+  flags_object = flags.Flags()
+
+  results = { 'flags': [ '-x', 'c' ] }
+  with patch( 'ycmd.completers.cpp.flags._CallExtraConfFlagsForFile',
+              return_value = results ):
+    flags_list = flags_object.FlagsForFile( '/foo', False )
+    assert_that( flags_list, contains( '-x', 'c' ) )
+
+  results[ 'flags' ] = [ '-x', 'c++' ]
+  with patch( 'ycmd.completers.cpp.flags._CallExtraConfFlagsForFile',
+              return_value = results ):
+    flags_list = flags_object.FlagsForFile( '/foo', False )
+    assert_that( flags_list, contains( '-x', 'c' ) )
+
+
+@patch( 'ycmd.extra_conf_store.ModuleForSourceFile', return_value = Mock() )
+def FlagsForFile_FlagsNotCachedWhenDoCacheIsFalse_test( *args ):
+  flags_object = flags.Flags()
+
+  results = {
+    'flags': [ '-x', 'c' ],
+    'do_cache': False
+  }
+  with patch( 'ycmd.completers.cpp.flags._CallExtraConfFlagsForFile',
+              return_value = results ):
+    flags_list = flags_object.FlagsForFile( '/foo', False )
+    assert_that( flags_list, contains( '-x', 'c' ) )
+
+  results[ 'flags' ] = [ '-x', 'c++' ]
+  with patch( 'ycmd.completers.cpp.flags._CallExtraConfFlagsForFile',
+              return_value = results ):
+    flags_list = flags_object.FlagsForFile( '/foo', False )
+    assert_that( flags_list, contains( '-x', 'c++' ) )
+
+
+@patch( 'ycmd.extra_conf_store.ModuleForSourceFile', return_value = Mock() )
+def FlagsForFile_FlagsCachedWhenDoCacheIsTrue_test( *args ):
+  flags_object = flags.Flags()
+
+  results = {
+    'flags': [ '-x', 'c' ],
+    'do_cache': True
+  }
+  with patch( 'ycmd.completers.cpp.flags._CallExtraConfFlagsForFile',
+              return_value = results ):
+    flags_list = flags_object.FlagsForFile( '/foo', False )
+    assert_that( flags_list, contains( '-x', 'c' ) )
+
+  results[ 'flags' ] = [ '-x', 'c++' ]
+  with patch( 'ycmd.completers.cpp.flags._CallExtraConfFlagsForFile',
+              return_value = results ):
+    flags_list = flags_object.FlagsForFile( '/foo', False )
+    assert_that( flags_list, contains( '-x', 'c' ) )
 
 
 def SanitizeFlags_Passthrough_test():
@@ -162,6 +220,46 @@ def RemoveUnusedFlags_RemoveFlagWithoutPrecedingDashFlag_test():
                                  filename ) )
 
 
+def RemoveUnusedFlags_Depfiles_test():
+  full_flags = [
+    '/bin/clang',
+    '-x', 'objective-c',
+    '-arch', 'armv7',
+    '-MMD',
+    '-MT', 'dependencies',
+    '-MF', 'file',
+    '--serialize-diagnostics', 'diagnostics'
+  ]
+
+  expected = [
+    '/bin/clang',
+    '-x', 'objective-c',
+    '-arch', 'armv7',
+  ]
+
+  assert_that( flags._RemoveUnusedFlags( full_flags, 'test.m' ),
+               contains( *expected ) )
+
+
+def EnableTypoCorrection_Empty_test():
+  eq_( flags._EnableTypoCorrection( [] ), [ '-fspell-checking' ] )
+
+
+def EnableTypoCorrection_Trivial_test():
+  eq_( flags._EnableTypoCorrection( [ '-x', 'c++' ] ),
+                                    [ '-x', 'c++', '-fspell-checking' ] )
+
+
+def EnableTypoCorrection_Reciprocal_test():
+  eq_( flags._EnableTypoCorrection( [ '-fno-spell-checking' ] ),
+                                    [ '-fno-spell-checking' ] )
+
+
+def EnableTypoCorrection_ReciprocalOthers_test():
+  eq_( flags._EnableTypoCorrection( [ '-x', 'c++', '-fno-spell-checking' ] ),
+                                    [ '-x', 'c++', '-fno-spell-checking' ] )
+
+
 def RemoveUnusedFlags_RemoveFilenameWithoutPrecedingInclude_test():
   def tester( flag ):
     expected = [ 'clang', flag, '/foo/bar', '-isystem/zoo/goo' ]
@@ -202,12 +300,12 @@ def RemoveXclangFlags_test():
        flags._RemoveXclangFlags( expected + to_remove + expected ) )
 
 
-def CompilerToLanguageFlag_Passthrough_test():
+def AddLanguageFlagWhenAppropriate_Passthrough_test():
   eq_( [ '-foo', '-bar' ],
-       flags._CompilerToLanguageFlag( [ '-foo', '-bar' ] ) )
+       flags._AddLanguageFlagWhenAppropriate( [ '-foo', '-bar' ] ) )
 
 
-def _ReplaceCompilerTester( compiler, language ):
+def _AddLanguageFlagWhenAppropriateTester( compiler, language_flag = [] ):
   to_removes = [
     [],
     [ '/usr/bin/ccache' ],
@@ -216,19 +314,20 @@ def _ReplaceCompilerTester( compiler, language ):
   expected = [ '-foo', '-bar' ]
 
   for to_remove in to_removes:
-    eq_( [ compiler, '-x', language ] + expected,
-         flags._CompilerToLanguageFlag( to_remove + [ compiler ] + expected ) )
+    eq_( [ compiler ] + language_flag + expected,
+         flags._AddLanguageFlagWhenAppropriate( to_remove + [ compiler ] +
+                                                expected ) )
 
 
-def CompilerToLanguageFlag_ReplaceCCompiler_test():
+def AddLanguageFlagWhenAppropriate_CCompiler_test():
   compilers = [ 'cc', 'gcc', 'clang', '/usr/bin/cc',
                 '/some/other/path', 'some_command' ]
 
   for compiler in compilers:
-    yield _ReplaceCompilerTester, compiler, 'c'
+    yield _AddLanguageFlagWhenAppropriateTester, compiler
 
 
-def CompilerToLanguageFlag_ReplaceCppCompiler_test():
+def AddLanguageFlagWhenAppropriate_CppCompiler_test():
   compilers = [ 'c++', 'g++', 'clang++', '/usr/bin/c++',
                 '/some/other/path++', 'some_command++',
                 'c++-5', 'g++-5.1', 'clang++-3.7.3', '/usr/bin/c++-5',
@@ -237,7 +336,7 @@ def CompilerToLanguageFlag_ReplaceCppCompiler_test():
                 '/some/other/path++-4.9.31', 'some_command++-5.10' ]
 
   for compiler in compilers:
-    yield _ReplaceCompilerTester, compiler, 'c++'
+    yield _AddLanguageFlagWhenAppropriateTester, compiler, [ '-x', 'c++' ]
 
 
 def ExtraClangFlags_test():

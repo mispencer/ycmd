@@ -25,18 +25,40 @@ from future import standard_library
 standard_library.install_aliases()
 from builtins import *  # noqa
 
-from hamcrest import ( assert_that, calling, contains, equal_to,
-                       has_entries, raises )
+from hamcrest import ( assert_that, calling, contains, contains_string,
+                       equal_to, has_entries, raises )
 from nose.tools import eq_
 from pprint import pprint
 from webtest import AppError
-import http.client
+import requests
 import os.path
 
 from ycmd.completers.cpp.clang_completer import NO_DOCUMENTATION_MESSAGE
 from ycmd.tests.clang import PathToTestFile, SharedYcmd
-from ycmd.tests.test_utils import BuildRequest, ErrorMatcher
+from ycmd.tests.test_utils import ( BuildRequest,
+                                    ErrorMatcher,
+                                    ChunkMatcher,
+                                    LineColMatcher )
 from ycmd.utils import ReadFile
+
+
+@SharedYcmd
+def Subcommands_DefinedSubcommands_test( app ):
+  subcommands_data = BuildRequest( completer_target = 'cpp' )
+  eq_( sorted( [ 'ClearCompilationFlagCache',
+                 'FixIt',
+                 'GetDoc',
+                 'GetDocImprecise',
+                 'GetParent',
+                 'GetType',
+                 'GetTypeImprecise',
+                 'GoTo',
+                 'GoToDeclaration',
+                 'GoToDefinition',
+                 'GoToImprecise',
+                 'GoToInclude' ] ),
+       app.post_json( '/defined_subcommands',
+                      subcommands_data ).json )
 
 
 @SharedYcmd
@@ -382,6 +404,14 @@ def Subcommands_GetType_test():
             test,
             [ 'GetType' ] )
 
+  # For every practical scenario, GetTypeImprecise is the same as GetType (it
+  # just skips the reparse)
+  for test in tests:
+    yield ( RunGetSemanticTest,
+            'GetType_Clang_test.cc',
+            test,
+            [ 'GetTypeImprecise' ] )
+
 
 def Subcommands_GetParent_test():
   tests = [
@@ -693,12 +723,63 @@ def FixIt_Check_unicode_Ins( results ):
   } ) )
 
 
+def FixIt_Check_cpp11_Note( results ):
+  assert_that( results, has_entries( {
+    'fixits': contains(
+      # First note: put parens around it
+      has_entries( {
+        'text': contains_string( 'parentheses around the assignment' ),
+        'chunks': contains(
+          ChunkMatcher( '(',
+                        LineColMatcher( 59, 8 ),
+                        LineColMatcher( 59, 8 ) ),
+          ChunkMatcher( ')',
+                        LineColMatcher( 61, 12 ),
+                        LineColMatcher( 61, 12 ) )
+        ),
+        'location': LineColMatcher( 60, 8 ),
+      } ),
+
+      # Second note: change to ==
+      has_entries( {
+        'text': contains_string( '==' ),
+        'chunks': contains(
+          ChunkMatcher( '==',
+                        LineColMatcher( 60, 8 ),
+                        LineColMatcher( 60, 9 ) )
+        ),
+        'location': LineColMatcher( 60, 8 ),
+      } )
+    )
+  } ) )
+
+
+def FixIt_Check_cpp11_SpellCheck( results ):
+  assert_that( results, has_entries( {
+    'fixits': contains(
+      # Change to SpellingIsNotMyStrongPoint
+      has_entries( {
+        'text': contains_string( "did you mean 'SpellingIsNotMyStrongPoint'" ),
+        'chunks': contains(
+          ChunkMatcher( 'SpellingIsNotMyStrongPoint',
+                        LineColMatcher( 72, 9 ),
+                        LineColMatcher( 72, 35 ) )
+        ),
+        'location': LineColMatcher( 72, 9 ),
+      } ) )
+  } ) )
+
+
 def Subcommands_FixIt_all_test():
   cfile = 'FixIt_Clang_cpp11.cpp'
   mfile = 'FixIt_Clang_objc.m'
   ufile = 'unicode.cc'
 
   tests = [
+    # L
+    # i   C
+    # n   o
+    # e   l   Lang     File,  Checker
     [ 16, 0,  'cpp11', cfile, FixIt_Check_cpp11_Ins ],
     [ 16, 1,  'cpp11', cfile, FixIt_Check_cpp11_Ins ],
     [ 16, 10, 'cpp11', cfile, FixIt_Check_cpp11_Ins ],
@@ -725,6 +806,12 @@ def Subcommands_FixIt_all_test():
 
     # unicode in line for fixit
     [ 21, 16, 'cpp11', ufile, FixIt_Check_unicode_Ins ],
+
+    # FixIt attached to a "child" diagnostic (i.e. a Note)
+    [ 60, 1,  'cpp11', cfile, FixIt_Check_cpp11_Note ],
+
+    # FixIt due to forced spell checking
+    [ 72, 9,  'cpp11', cfile, FixIt_Check_cpp11_SpellCheck ],
   ]
 
   for test in tests:
@@ -841,7 +928,7 @@ def Subcommands_GetDoc_Undocumented_test( app ):
                             event_data,
                             expect_errors = True )
 
-  eq_( response.status_code, http.client.INTERNAL_SERVER_ERROR )
+  eq_( response.status_code, requests.codes.internal_server_error )
 
   assert_that( response.json,
                ErrorMatcher( ValueError, NO_DOCUMENTATION_MESSAGE ) )
@@ -865,7 +952,7 @@ def Subcommands_GetDoc_NoCursor_test( app ):
                             event_data,
                             expect_errors = True )
 
-  eq_( response.status_code, http.client.INTERNAL_SERVER_ERROR )
+  eq_( response.status_code, requests.codes.internal_server_error )
 
   assert_that( response.json,
                ErrorMatcher( ValueError, NO_DOCUMENTATION_MESSAGE ) )
@@ -873,7 +960,7 @@ def Subcommands_GetDoc_NoCursor_test( app ):
 
 # Following tests repeat the tests above, but without re-parsing the file
 @SharedYcmd
-def Subcommands_GetDocQuick_Variable_test( app ):
+def Subcommands_GetDocImprecise_Variable_test( app ):
   filepath = PathToTestFile( 'GetDoc_Clang.cc' )
   contents = ReadFile( filepath )
 
@@ -890,7 +977,7 @@ def Subcommands_GetDocQuick_Variable_test( app ):
                              line_num = 70,
                              column_num = 24,
                              contents = contents,
-                             command_arguments = [ 'GetDocQuick' ],
+                             command_arguments = [ 'GetDocImprecise' ],
                              completer_target = 'filetype_default' )
 
   response = app.post_json( '/run_completer_command', event_data ).json
@@ -910,7 +997,7 @@ The first line of comment is the brief.""" } )
 
 
 @SharedYcmd
-def Subcommands_GetDocQuick_Method_test( app ):
+def Subcommands_GetDocImprecise_Method_test( app ):
   filepath = PathToTestFile( 'GetDoc_Clang.cc' )
   contents = ReadFile( filepath )
 
@@ -929,7 +1016,7 @@ def Subcommands_GetDocQuick_Method_test( app ):
                              line_num = 22,
                              column_num = 13,
                              contents = contents,
-                             command_arguments = [ 'GetDocQuick' ],
+                             command_arguments = [ 'GetDocImprecise' ],
                              completer_target = 'filetype_default' )
 
   response = app.post_json( '/run_completer_command', event_data ).json
@@ -953,7 +1040,7 @@ This is more information
 
 
 @SharedYcmd
-def Subcommands_GetDocQuick_Namespace_test( app ):
+def Subcommands_GetDocImprecise_Namespace_test( app ):
   filepath = PathToTestFile( 'GetDoc_Clang.cc' )
   contents = ReadFile( filepath )
 
@@ -972,7 +1059,7 @@ def Subcommands_GetDocQuick_Namespace_test( app ):
                              line_num = 65,
                              column_num = 14,
                              contents = contents,
-                             command_arguments = [ 'GetDocQuick' ],
+                             command_arguments = [ 'GetDocImprecise' ],
                              completer_target = 'filetype_default' )
 
   response = app.post_json( '/run_completer_command', event_data ).json
@@ -990,7 +1077,7 @@ This is a test namespace""" } ) # noqa
 
 
 @SharedYcmd
-def Subcommands_GetDocQuick_Undocumented_test( app ):
+def Subcommands_GetDocImprecise_Undocumented_test( app ):
   filepath = PathToTestFile( 'GetDoc_Clang.cc' )
   contents = ReadFile( filepath )
 
@@ -1009,21 +1096,21 @@ def Subcommands_GetDocQuick_Undocumented_test( app ):
                              line_num = 81,
                              column_num = 17,
                              contents = contents,
-                             command_arguments = [ 'GetDocQuick' ],
+                             command_arguments = [ 'GetDocImprecise' ],
                              completer_target = 'filetype_default' )
 
   response = app.post_json( '/run_completer_command',
                             event_data,
                             expect_errors = True )
 
-  eq_( response.status_code, http.client.INTERNAL_SERVER_ERROR )
+  eq_( response.status_code, requests.codes.internal_server_error )
 
   assert_that( response.json,
                ErrorMatcher( ValueError, NO_DOCUMENTATION_MESSAGE ) )
 
 
 @SharedYcmd
-def Subcommands_GetDocQuick_NoCursor_test( app ):
+def Subcommands_GetDocImprecise_NoCursor_test( app ):
   filepath = PathToTestFile( 'GetDoc_Clang.cc' )
   contents = ReadFile( filepath )
 
@@ -1042,21 +1129,21 @@ def Subcommands_GetDocQuick_NoCursor_test( app ):
                              line_num = 1,
                              column_num = 1,
                              contents = contents,
-                             command_arguments = [ 'GetDocQuick' ],
+                             command_arguments = [ 'GetDocImprecise' ],
                              completer_target = 'filetype_default' )
 
   response = app.post_json( '/run_completer_command',
                             event_data,
                             expect_errors = True )
 
-  eq_( response.status_code, http.client.INTERNAL_SERVER_ERROR )
+  eq_( response.status_code, requests.codes.internal_server_error )
 
   assert_that( response.json,
                ErrorMatcher( ValueError, NO_DOCUMENTATION_MESSAGE ) )
 
 
 @SharedYcmd
-def Subcommands_GetDocQuick_NoReadyToParse_test( app ):
+def Subcommands_GetDocImprecise_NoReadyToParse_test( app ):
   filepath = PathToTestFile( 'GetDoc_Clang.cc' )
   contents = ReadFile( filepath )
 
@@ -1066,7 +1153,7 @@ def Subcommands_GetDocQuick_NoReadyToParse_test( app ):
                              line_num = 11,
                              column_num = 18,
                              contents = contents,
-                             command_arguments = [ 'GetDocQuick' ],
+                             command_arguments = [ 'GetDocImprecise' ],
                              completer_target = 'filetype_default' )
 
   response = app.post_json( '/run_completer_command', event_data ).json

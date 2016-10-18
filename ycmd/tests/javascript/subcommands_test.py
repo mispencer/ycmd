@@ -27,13 +27,14 @@ from builtins import *  # noqa
 from hamcrest import assert_that, contains, contains_inanyorder, has_entries
 from nose.tools import eq_
 from pprint import pformat
-import http.client
+import requests
 
 from ycmd.tests.javascript import IsolatedYcmd, PathToTestFile, SharedYcmd
 from ycmd.tests.test_utils import ( BuildRequest,
                                     ChunkMatcher,
                                     ErrorMatcher,
-                                    LocationMatcher )
+                                    LocationMatcher,
+                                    WaitUntilCompleterServerReady )
 from ycmd.utils import ReadFile
 
 
@@ -45,16 +46,16 @@ def Subcommands_DefinedSubcommands_test( app ):
                  'GoTo',
                  'GetDoc',
                  'GetType',
-                 'StartServer',
-                 'StopServer',
                  'GoToReferences',
-                 'RefactorRename' ] ),
+                 'RefactorRename',
+                 'RestartServer' ] ),
        app.post_json( '/defined_subcommands',
                       subcommands_data ).json )
 
 
-def RunTest( app, test ):
-  contents = ReadFile( test[ 'request' ][ 'filepath' ] )
+def RunTest( app, test, contents = None ):
+  if not contents:
+    contents = ReadFile( test[ 'request' ][ 'filepath' ] )
 
   def CombineRequest( request, data ):
     kw = request
@@ -105,7 +106,7 @@ def Subcommands_GoToDefinition_test( app ):
       'filepath': PathToTestFile( 'simple_test.js' ),
     },
     'expect': {
-      'response': http.client.OK,
+      'response': requests.codes.ok,
       'data': has_entries( {
         'filepath': PathToTestFile( 'simple_test.js' ),
         'line_num': 1,
@@ -126,7 +127,7 @@ def Subcommands_GoToDefinition_Unicode_test( app ):
       'filepath': PathToTestFile( 'unicode.js' ),
     },
     'expect': {
-      'response': http.client.OK,
+      'response': requests.codes.ok,
       'data': has_entries( {
         'filepath': PathToTestFile( 'unicode.js' ),
         'line_num': 6,
@@ -147,7 +148,7 @@ def Subcommands_GoTo_test( app ):
       'filepath': PathToTestFile( 'simple_test.js' ),
     },
     'expect': {
-      'response': http.client.OK,
+      'response': requests.codes.ok,
       'data': has_entries( {
         'filepath': PathToTestFile( 'simple_test.js' ),
         'line_num': 1,
@@ -155,6 +156,31 @@ def Subcommands_GoTo_test( app ):
       } )
     }
   } )
+
+
+@IsolatedYcmd
+def Subcommands_GoTo_RelativePath_test( app ):
+  WaitUntilCompleterServerReady( app, 'javascript' )
+  RunTest(
+    app,
+    {
+      'description': 'GoTo works when the buffer differs from the file on disk',
+      'request': {
+        'command': 'GoTo',
+        'line_num': 43,
+        'column_num': 25,
+        'filepath': PathToTestFile( 'simple_test.js' ),
+      },
+      'expect': {
+        'response': requests.codes.ok,
+        'data': has_entries( {
+          'filepath': PathToTestFile( 'simple_test.js' ),
+          'line_num': 31,
+          'column_num': 5,
+        } )
+      }
+    },
+    contents = ReadFile( PathToTestFile( 'simple_test.modified.js' ) ) )
 
 
 @SharedYcmd
@@ -168,7 +194,7 @@ def Subcommands_GetDoc_test( app ):
       'filepath': PathToTestFile( 'coollib', 'cool_object.js' ),
     },
     'expect': {
-      'response': http.client.OK,
+      'response': requests.codes.ok,
       'data': has_entries( {
         'detailed_info': (
           'Name: mine_bitcoin\n'
@@ -192,7 +218,7 @@ def Subcommands_GetType_test( app ):
       'filepath': PathToTestFile( 'coollib', 'cool_object.js' ),
     },
     'expect': {
-      'response': http.client.OK,
+      'response': requests.codes.ok,
       'data': has_entries( {
         'message': 'number'
       } )
@@ -211,7 +237,7 @@ def Subcommands_GoToReferences_test( app ):
       'filepath': PathToTestFile( 'coollib', 'cool_object.js' ),
     },
     'expect': {
-      'response': http.client.OK,
+      'response': requests.codes.ok,
       'data': contains_inanyorder(
         has_entries( {
           'filepath': PathToTestFile( 'coollib', 'cool_object.js' ),
@@ -239,7 +265,7 @@ def Subcommands_GoToReferences_Unicode_test( app ):
       'filepath': PathToTestFile( 'unicode.js' ),
     },
     'expect': {
-      'response': http.client.OK,
+      'response': requests.codes.ok,
       'data': contains_inanyorder(
         has_entries( {
           'filepath': PathToTestFile( 'unicode.js' ),
@@ -272,7 +298,7 @@ def Subcommands_GetDocWithNoItendifier_test( app ):
       'column_num': 1,
     },
     'expect': {
-      'response': http.client.INTERNAL_SERVER_ERROR,
+      'response': requests.codes.internal_server_error,
       'data': ErrorMatcher( RuntimeError, 'TernError: No type found '
                                           'at the given position.' ),
     }
@@ -292,7 +318,7 @@ def Subcommands_RefactorRename_Simple_test( app ):
       'column_num': 32,
     },
     'expect': {
-      'response': http.client.OK,
+      'response': requests.codes.ok,
       'data': has_entries ( {
         'fixits': contains( has_entries( {
           'chunks': contains(
@@ -340,7 +366,7 @@ def Subcommands_RefactorRename_MultipleFiles_test( app ):
       'column_num': 14,
     },
     'expect': {
-      'response': http.client.OK,
+      'response': requests.codes.ok,
       'data': has_entries ( {
         'fixits': contains( has_entries( {
           'chunks': contains(
@@ -372,6 +398,8 @@ def Subcommands_RefactorRename_MultipleFiles_test( app ):
 # an extra file into tern's project memory)
 @IsolatedYcmd
 def Subcommands_RefactorRename_MultipleFiles_OnFileReadyToParse_test( app ):
+  WaitUntilCompleterServerReady( app, 'javascript' )
+
   file1 = PathToTestFile( 'file1.js' )
   file2 = PathToTestFile( 'file2.js' )
   file3 = PathToTestFile( 'file3.js' )
@@ -401,7 +429,7 @@ def Subcommands_RefactorRename_MultipleFiles_OnFileReadyToParse_test( app ):
       'column_num': 14,
     },
     'expect': {
-      'response': http.client.OK,
+      'response': requests.codes.ok,
       'data': has_entries( {
         'fixits': contains( has_entries( {
           'chunks': contains(
@@ -444,7 +472,7 @@ def Subcommands_RefactorRename_Missing_New_Name_test( app ):
       'filepath': PathToTestFile( 'coollib', 'cool_object.js' ),
     },
     'expect': {
-      'response': http.client.INTERNAL_SERVER_ERROR,
+      'response': requests.codes.internal_server_error,
       'data': ErrorMatcher( ValueError,
                             'Please specify a new name to rename it to.\n'
                             'Usage: RefactorRename <new name>' ),
@@ -465,7 +493,7 @@ def Subcommands_RefactorRename_Unicode_test( app ):
       'column_num': 3,
     },
     'expect': {
-      'response': http.client.OK,
+      'response': requests.codes.ok,
       'data': has_entries ( {
         'fixits': contains( has_entries( {
           'chunks': contains(

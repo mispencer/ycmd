@@ -26,7 +26,10 @@ from builtins import *  # noqa
 import functools
 import os
 
-from ycmd.tests.test_utils import BuildRequest, ClearCompletionsCache, SetUpApp
+from ycmd import handlers
+from ycmd.tests.test_utils import ( ClearCompletionsCache, SetUpApp,
+                                    StopCompleterServer,
+                                    WaitUntilCompleterServerReady )
 
 shared_app = None
 
@@ -34,13 +37,6 @@ shared_app = None
 def PathToTestFile( *args ):
   dir_of_current_script = os.path.dirname( os.path.abspath( __file__ ) )
   return os.path.join( dir_of_current_script, 'testdata', *args )
-
-
-def StopGoCodeServer( app ):
-  app.post_json( '/run_completer_command',
-                 BuildRequest( completer_target = 'filetype_default',
-                               command_arguments = [ 'StopServer' ],
-                               filetype = 'go' ) )
 
 
 def setUpPackage():
@@ -51,12 +47,13 @@ def setUpPackage():
   global shared_app
 
   shared_app = SetUpApp()
+  WaitUntilCompleterServerReady( shared_app, 'go' )
 
 
 def tearDownPackage():
   global shared_app
 
-  StopGoCodeServer( shared_app )
+  StopCompleterServer( shared_app, 'go' )
 
 
 def SharedYcmd( test ):
@@ -70,4 +67,24 @@ def SharedYcmd( test ):
   def Wrapper( *args, **kwargs ):
     ClearCompletionsCache()
     return test( shared_app, *args, **kwargs )
+  return Wrapper
+
+
+def IsolatedYcmd( test ):
+  """Defines a decorator to be attached to tests of this package. This decorator
+  passes a unique ycmd application as a parameter. It should be used on tests
+  that change the server state in a irreversible way (ex: a semantic subserver
+  is stopped or restarted) or expect a clean state (ex: no semantic subserver
+  started, no .ycm_extra_conf.py loaded, etc).
+
+  Do NOT attach it to test generators but directly to the yielded tests."""
+  @functools.wraps( test )
+  def Wrapper( *args, **kwargs ):
+    old_server_state = handlers._server_state
+    app = SetUpApp()
+    try:
+      test( app, *args, **kwargs )
+    finally:
+      StopCompleterServer( app, 'go' )
+      handlers._server_state = old_server_state
   return Wrapper

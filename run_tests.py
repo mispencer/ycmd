@@ -55,7 +55,7 @@ COMPLETERS = {
     'aliases': [ 'c', 'cpp', 'c++', 'objc', 'clang', ]
   },
   'cs': {
-    'build': [ '--omnisharp-completer', '--roslyn-omnisharp-completer' ],
+    'build': [ '--omnisharp-completer' ],
     'test': [ '--exclude-dir=ycmd/tests/cs' ],
     'aliases': [ 'omnisharp', 'csharp', 'c#' ]
   },
@@ -192,7 +192,9 @@ def NoseTests( parsed_args, extra_nosetests_args ):
       nosetests_args.extend( COMPLETERS[ key ][ 'test' ] )
 
   if parsed_args.coverage:
-    nosetests_args += [ '--with-coverage', '--cover-package=ycmd',
+    nosetests_args += [ '--with-coverage',
+                        '--cover-erase',
+                        '--cover-package=ycmd',
                         '--cover-html' ]
 
   if extra_nosetests_args:
