@@ -81,6 +81,10 @@ def OnWindows():
   return platform.system() == 'Windows'
 
 
+def OnCygwin():
+  return platform.system().startswith("CYGWIN")
+
+
 def OnTravisOrAppVeyor():
   return 'CI' in os.environ
 
@@ -249,6 +253,8 @@ def ParseArguments():
                        'from llvm.org. NOT RECOMMENDED OR SUPPORTED!' )
   parser.add_argument( '--omnisharp-completer', action = 'store_true',
                        help = 'Build C# semantic completion engine.' )
+  parser.add_argument( '--roslyn-omnisharp-completer', action = 'store_true',
+                       help = 'Build C# semantic completion engine (roslyn version).' )
   parser.add_argument( '--gocode-completer', action = 'store_true',
                        help = 'Build Go semantic completion engine.' )
   parser.add_argument( '--racer-completer', action = 'store_true',
@@ -413,7 +419,7 @@ def BuildYcmdLib( args ):
       rmtree( build_dir, ignore_errors = OnTravisOrAppVeyor() )
 
 
-def BuildOmniSharp():
+def BuildLegacyOmniSharp():
   build_command = PathToFirstExistingExecutable(
     [ 'msbuild', 'msbuild.exe', 'xbuild' ] )
   if not build_command:
@@ -422,6 +428,82 @@ def BuildOmniSharp():
   os.chdir( p.join( DIR_OF_THIS_SCRIPT, 'third_party', 'OmniSharpServer' ) )
   CheckCall( [ build_command, '/property:Configuration=Release',
                               '/property:TargetFrameworkVersion=v4.5' ] )
+
+
+def BuildRoslynOmniSharp():
+  build_dir = p.join( DIR_OF_THIRD_PARTY, "omnisharp-roslyn" )
+  try:
+    try:
+      os.mkdir( build_dir )
+    except OSError:
+      pass
+    os.chdir( build_dir )
+    version = "v1.9-alpha14"
+    url_pattern = ( "https://github.com/OmniSharp/omnisharp-roslyn/"
+                    "releases/download/{0}/{1}" )
+    if OnWindows() or OnCygwin():
+      if platform.machine().endswith( '64' ):
+        url_file = 'omnisharp-win-x64-netcoreapp1.0.zip'
+      else:
+        url_file = 'omnisharp-win-x86-netcoreapp1.0.zip'
+    elif OnMac():
+      url_file = 'omnisharp-osx-x64-netcoreapp1.0.tar.gz'
+    else:
+      disto_package_names = {
+        'Centos': 'omnisharp-centos-x64-netcoreapp1.0.tar.gz',
+        'debian': 'omnisharp-debian-x64-netcoreapp1.0.tar.gz',
+        'rhel': 'omnisharp-rhel-x64-netcoreapp1.0.tar.gz',
+        'Ubuntu': 'omnisharp-ubuntu-x64-netcoreapp1.0.tar.gz'
+      }
+      supported_dists = disto_package_names.keys()
+      disto = platform.linux_distribution( supported_dists = supported_dists,
+                                        full_distribution_name = False )[ 0 ]
+      try:
+        url_file = disto_package_names[ disto ]
+      except KeyValue:
+        url_file = 'omnisharp-linux-x64-netcoreapp1.0.tar.gz'
+
+    try:
+      os.mkdir( version )
+    except OSError:
+      pass
+
+    file_path = p.join( version, url_file )
+    if not p.exists( file_path ):
+      sys.path.insert( 1, p.abspath( p.join( DIR_OF_THIRD_PARTY,
+                                             'requests' ) ) )
+      import requests
+      result = requests.get( url_pattern.format( version, url_file ) )
+      with open( file_path, 'wb' ) as fh:
+        fh.write( result.content )
+
+    if OnCygwin():
+      extract_command = [ 'unzip', file_path ]
+    elif OnWindows():
+      try:
+        import _winreg
+      except ImportError:
+        import winreg as _winreg
+
+      wow64 = _winreg.KEY_READ | _winreg.KEY_WOW64_64KEY
+      with _winreg.ConnectRegistry( None, _winreg.HKEY_LOCAL_MACHINE ) as LM:
+        with _winreg.OpenKey( LM, 'SOFTWARE', 0, wow64 ) as S:
+          with _winreg.OpenKey( S, '7-Zip', 0, wow64 ) as SZ:
+            seven_zip_path = _winreg.QueryValueEx( SZ, 'Path' )[ 0 ]
+
+      extract_command = [ p.join( seven_zip_path, '7z.exe' ), 'x', file_path ]
+    else:
+      extract_command = [ 'tar', 'xfv', file_path ]
+
+    subprocess.check_call( extract_command )
+
+    if OnCygwin():
+      import glob
+      exes = glob.glob( '*.exe' )
+      dlls = glob.glob( '*.dll' )
+      subprocess.check_call( [ "chmod", "a+x" ] + exes + dlls  )
+  finally:
+    os.chdir( DIR_OF_THIS_SCRIPT )
 
 
 def BuildGoCode():
@@ -493,7 +575,9 @@ def Main():
   ExitIfYcmdLibInUseOnWindows()
   BuildYcmdLib( args )
   if args.omnisharp_completer or args.all_completers:
-    BuildOmniSharp()
+    BuildLegacyOmniSharp()
+  if args.roslyn_omnisharp_completer or args.all_completers:
+    BuildRoslynOmniSharp()
   if args.gocode_completer or args.all_completers:
     BuildGoCode()
   if args.tern_completer or args.all_completers:
