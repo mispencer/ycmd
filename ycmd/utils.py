@@ -458,6 +458,7 @@ _cygpath_data = {
   False: { 'Process': None, 'Data': {} }
 }
 
+
 def ConvertFilename( filename, direction ):
   global _cygpath_data
   if not OnCygwin():
@@ -472,7 +473,9 @@ def ConvertFilename( filename, direction ):
     if not cygpath:
       dir_arg = '-w' if direction else '-u'
       command = [ 'cygpath', '-f', '-', dir_arg ]
-      cygpath = SafePopen( command , stdout = subprocess.PIPE, stdin = subprocess.PIPE, bufsize = 1, universal_newlines = True )
+      cygpath = SafePopen( command , stdout = subprocess.PIPE,
+                           stdin = subprocess.PIPE, bufsize = 1,
+                           universal_newlines = True )
       _cygpath_data[ direction ][ 'Process' ] = cygpath
 
     cygpath.stdin.write( filename + "\r\n" )

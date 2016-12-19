@@ -274,7 +274,8 @@ class CsharpCompleter( Completer ):
     if filepath not in self._solution_for_file:
       # NOTE: detection could throw an exception if an extra_conf_store needs
       # to be confirmed
-      path_to_solutionfile = solutiondetection.FindSolutionPath( utils.ConvertFilename( filepath, False ) )
+      path_to_solutionfile = solutiondetection.FindSolutionPath(
+                               utils.ConvertFilename( filepath, False ) )
       if not path_to_solutionfile:
         raise RuntimeError( 'Autodetection of solution file failed.' )
       self._solution_for_file[ filepath ] = path_to_solutionfile
@@ -283,13 +284,16 @@ class CsharpCompleter( Completer ):
 
 
 class CsharpSolutionCompleter( object ):
-  def __init__( self, solution_path, keep_logfiles, desired_omnisharp_port, max_diagnostics_to_display ):
+  def __init__( self, solution_path, keep_logfiles, desired_omnisharp_port,
+                max_diagnostics_to_display ):
     self._logger = logging.getLogger( __name__ )
     self._solution_path = solution_path
     self._keep_logfiles = keep_logfiles
     self._max_diagnostics_to_display = max_diagnostics_to_display
     self._omnisharp_path = PATH_TO_OMNISHARP_BINARY
-    self._diagnostic_store = defaultdict( lambda : defaultdict( lambda : defaultdict( list ) ) )
+    self._diagnostic_store = defaultdict( lambda :
+                                          defaultdict( lambda :
+                                                       defaultdict( list ) ) )
     self._filename_stderr = None
     self._filename_stdout = None
     self._omnisharp_port = None
@@ -320,7 +324,8 @@ class CsharpSolutionCompleter( object ):
     self._SetDiagnosticsInDiagStructure( diagnostics, filename, "PARSE" )
 
     return [ responses.BuildDiagnosticData( x ) for x in
-             self._GetDiagnosticsForWholeFileFromDiagStructure( filename )[ : self._max_diagnostics_to_display ] ]
+             self._GetDiagnosticsForWholeFileFromDiagStructure( filename )
+             [ : self._max_diagnostics_to_display ] ]
 
 
   def _QuickFixToDiagnostic( self, quick_fix ):
@@ -348,7 +353,8 @@ class CsharpSolutionCompleter( object ):
     if not self._diagnostic_store:
       raise ValueError( NO_DIAGNOSTIC_MESSAGE )
 
-    diagnostics = self._GetDiagnosticsForLineFromDiagStructure( current_file, current_line )
+    diagnostics = self._GetDiagnosticsForLineFromDiagStructure( current_file,
+                                                                current_line )
     if not diagnostics:
       raise ValueError( NO_DIAGNOSTIC_MESSAGE )
 
@@ -380,11 +386,13 @@ class CsharpSolutionCompleter( object ):
 
       self._ChooseOmnisharpPort()
 
+      native_path_to_solutionfile = utils.ConvertFilename( path_to_solutionfile,
+                                                           True )
       command = [ self._omnisharp_path,
                   '-p',
                   str( self._omnisharp_port ),
                   '-s',
-                  u'{0}'.format( utils.ConvertFilename( path_to_solutionfile, True ) ) ]
+                  u'{0}'.format( native_path_to_solutionfile ) ]
 
       if not utils.OnWindows() and not utils.OnCygwin():
         command.insert( 0, 'mono' )
@@ -574,7 +582,7 @@ class CsharpSolutionCompleter( object ):
             _DecodeDescription( x[ 'Text' ] ) )
           for x in usages[ 'QuickFixes' ] ]
     else:
-      if usages[ 'QuickFixes' ] == None:
+      if usages[ 'QuickFixes' ] is None:
         raise RuntimeError( 'Can\'t jump to usage' )
       else:
         raise RuntimeError( 'No usages found' )
@@ -675,7 +683,8 @@ class CsharpSolutionCompleter( object ):
       del line[:]
 
     for diagnostic in diagnostics:
-        self._diagnostic_store[ filename ][ source ][ diagnostic.location_.line_number_ ].append( diagnostic )
+        source_store = self._diagnostic_store[ filename ][ source ]
+        source_store[ diagnostic.location_.line_number_ ] .append( diagnostic )
 
   def _SetAllFileDiagnosticsInDiagStructure( self, diagnostics, source ):
     for filename in self._diagnostic_store:
@@ -683,7 +692,9 @@ class CsharpSolutionCompleter( object ):
         del line[:]
 
     for diagnostic in diagnostics:
-      self._diagnostic_store[ diagnostic.location_.filename_ ][ source ][ diagnostic.location_.line_number_ ].append( diagnostic )
+      filename = diagnostic.location_.filename_
+      source_store = self._diagnostic_store[ filename ][ source ]
+      source_store[ diagnostic.location_.line_number_ ] .append( diagnostic )
 
 
   def _GetDiagnosticsForLineFromDiagStructure( self, filename, line ):

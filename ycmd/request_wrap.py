@@ -52,7 +52,8 @@ class RequestWrap( object ):
     except KeyError:
       pass
     self._filepath = _ConvertPath( self._request[ 'filepath' ] )
-    _logger.info( "Input: %s, Output: %s", self._request[ 'filepath' ], self._filepath )
+    _logger.info( "Input: %s, Output: %s", self._request[ 'filepath' ],
+                                           self._filepath )
     self._computed_key = {
       # Unicode string representation of the current line
       'line_value': self._CurrentLine,

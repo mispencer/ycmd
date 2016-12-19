@@ -253,7 +253,8 @@ DEFAULT_FILETYPE_TRIGGERS = {
   'cpp,objcpp' : [ '->', '.', '::' ],
   'perl' : [ '->' ],
   'php' : [ '->', '::' ],
-  'cs,cshtml,razor,java,javascript,typescript,d,python,perl6,scala,vb,elixir,go,groovy' : [
+  'cs,cshtml,razor,java,javascript,typescript'
+  + ',d,python,perl6,scala,vb,elixir,go,groovy' : [
     '.'
   ],
   'ruby,rust' : [ '.', '::' ],
