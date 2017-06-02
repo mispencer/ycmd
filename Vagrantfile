@@ -29,4 +29,10 @@ Vagrant.configure(2) do |config|
     v.linked_clone = true
     v.update_guest_tools = true
   end
+
+  config.vm.provider "hyperv" do |v, override|
+    override.vm.box = "kmm/ubuntu-xenial64"
+    v.memory = 3072
+    v.cpus = 2
+  end
 end
