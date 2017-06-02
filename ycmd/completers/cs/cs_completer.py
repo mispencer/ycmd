@@ -35,27 +35,17 @@ import requests
 import threading
 
 from ycmd.completers.completer import Completer
-<<<<<<< HEAD
-from ycmd.completers.completer_utils import GetFileContents
-from ycmd.completers.cs import solutiondetection
 from ycmd.utils import ( ForceSemanticCompletion, CodepointOffsetToByteOffset,
-                         urljoin )
-from ycmd import responses
-from ycmd import utils
-=======
-from ycmd.utils import ( ForceSemanticCompletion, CodepointOffsetToByteOffset,
-                         ToUnicode )
+                         ToUnicode, urljoin )
 from ycmd import responses
 from ycmd import utils
 from ycmd.completers.completer_utils import GetFileContents
 from requests import ( Session )
-import urllib.parse
 import logging
-from . import solutiondetection
+from ycmd.completers.cs import solutiondetection
 import threading
 import traceback
 from subprocess import ( PIPE )
->>>>>>> Support using omnisharp-roslyn
 
 SERVER_NOT_FOUND_MSG = ( 'OmniSharp server binary not found at {0}. ' +
                          'Did you compile it? You can do so by running ' +
@@ -394,7 +384,6 @@ class CsharpSolutionCompleter( object ):
     self._omnisharp_phandle = None
     self._desired_omnisharp_port = desired_omnisharp_port
     self._server_state_lock = threading.RLock()
-    self._session = None
 
 
   def CodeCheck( self, request_data ):
@@ -505,7 +494,6 @@ class CsharpSolutionCompleter( object ):
   def _CleanupAfterServerStop( self ):
     self._omnisharp_port = None
     self._omnisharp_phandle = None
-    self._session = None
 
 
   def _RestartServer( self ):
@@ -677,10 +665,8 @@ class CsharpSolutionCompleter( object ):
   def _GetResponse( self, handler, parameters = {}, timeout = None ):
     """ Handle communication with server """
     target = urljoin( self._ServerLocation(), handler )
-    if self._session is None:
-      self._session = Session()
     self._logger.info( u'Sending request' )
-    response = self._session.post( target,
+    response = requests.post( target,
                                    json = parameters,
                                    timeout = timeout )
     self._logger.info( u'Received response request' )
