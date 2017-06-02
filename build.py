@@ -453,7 +453,7 @@ def BuildRoslynOmniSharp():
     except OSError:
       pass
     os.chdir( build_dir )
-    version = "v1.19.0"
+    version = "v1.20.0"
     url_pattern = ( "https://github.com/OmniSharp/omnisharp-roslyn/"
                     "releases/download/{0}/{1}" )
     if OnWindows() or OnCygwin():
