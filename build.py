@@ -676,6 +676,8 @@ def EnableCsCompleter( args ):
     version = "v1.32.8"
     url_file = GetCsCompleterFileNameForPlatform()
 
+    CleanCsCompleter( build_dir, version )
+
     try:
       os.mkdir( version )
     except OSError:
@@ -683,38 +685,42 @@ def EnableCsCompleter( args ):
 
     package_path = p.join( version, url_file )
     if not p.exists( package_path ):
-      DownloadFileTo( url_pattern.format( version, url_file ), p.join( build_dir, package_path ) )
-
-    for file_name in os.listdir( build_dir ):
-      file_path = os.path.join( build_dir, file_name )
-      if file_name == version:
-        continue
-      if os.path.isfile( file_path ):
-        os.unlink( file_path )
-      elif os.path.isdir( file_path ):
-        import shutil
-        shutil.rmtree( file_path )
-
+      DownloadFileTo( url_pattern.format( version, url_file ), package_path )
 
     if OnWindows():
-      try:
-        import _winreg
-      except ImportError:
-        import winreg as _winreg
-
-      wow64 = _winreg.KEY_READ | _winreg.KEY_WOW64_64KEY
-      with _winreg.ConnectRegistry( None, _winreg.HKEY_LOCAL_MACHINE ) as LM:
-        with _winreg.OpenKey( LM, 'SOFTWARE', 0, wow64 ) as S:
-          with _winreg.OpenKey( S, '7-Zip', 0, wow64 ) as SZ:
-            seven_zip_path = _winreg.QueryValueEx( SZ, 'Path' )[ 0 ]
-
-      extract_command = [ p.join( seven_zip_path, '7z.exe' ), 'x', package_path ]
+      extract_command = [ GetSevenZipPath(), 'x', package_path ]
     else:
       extract_command = [ 'tar', 'xfv', package_path ]
 
     subprocess.check_call( extract_command )
   finally:
     os.chdir( DIR_OF_THIS_SCRIPT )
+
+
+def CleanCsCompleter( build_dir, version ):
+  for file_name in os.listdir( build_dir ):
+    file_path = os.path.join( build_dir, file_name )
+    if file_name == version:
+      continue
+    if os.path.isfile( file_path ):
+      os.unlink( file_path )
+    elif os.path.isdir( file_path ):
+      import shutil
+      shutil.rmtree( file_path )
+
+
+def GetSevenZipPath():
+    try:
+      import _winreg
+    except ImportError:
+      import winreg as _winreg
+
+    wow64 = _winreg.KEY_READ | _winreg.KEY_WOW64_64KEY
+    with _winreg.ConnectRegistry( None, _winreg.HKEY_LOCAL_MACHINE ) as LM:
+      with _winreg.OpenKey( LM, 'SOFTWARE', 0, wow64 ) as S:
+        with _winreg.OpenKey( S, '7-Zip', 0, wow64 ) as SZ:
+          seven_zip_path = _winreg.QueryValueEx( SZ, 'Path' )[ 0 ]
+          return p.join( seven_zip_path, '7z.exe' )
 
 
 def GetCsCompleterFileNameForPlatform():
