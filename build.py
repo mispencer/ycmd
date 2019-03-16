@@ -133,10 +133,6 @@ def OnWindows():
   return platform.system() == 'Windows'
 
 
-def OnCygwin():
-  return platform.system().startswith( "CYGWIN" )
-
-
 def OnFreeBSD():
   return platform.system() == 'FreeBSD'
 
@@ -666,21 +662,7 @@ def BuildRegexModule( cmake, cmake_common_args, script_args ):
     rmtree( build_dir, ignore_errors = OnCiService() )
 
 
-def EnableLegacyCsCompleter( args ):
-  build_command = PathToFirstExistingExecutable(
-    [ 'msbuild', 'msbuild.exe', 'xbuild' ] )
-  if not build_command:
-    sys.exit( 'ERROR: msbuild or xbuild is required to build Omnisharp.' )
-
-  os.chdir( p.join( DIR_OF_THIS_SCRIPT, 'third_party', 'OmniSharpServer' ) )
-  CheckCall( [ build_command, '/property:Configuration=Release',
-                              '/property:Platform=Any CPU',
-                              '/property:TargetFrameworkVersion=v4.5' ],
-             quiet = args.quiet,
-             status_message = 'Building OmniSharp for C# completion' )
-
-
-def EnableNewCsCompleter( args ):
+def EnableCsCompleter( args ):
   build_dir = p.join( DIR_OF_THIRD_PARTY, "omnisharp-roslyn" )
   try:
     try:
@@ -688,40 +670,11 @@ def EnableNewCsCompleter( args ):
     except OSError:
       pass
     os.chdir( build_dir )
-    version = "v1.28.0"
+
     url_pattern = ( "https://github.com/OmniSharp/omnisharp-roslyn/"
                     "releases/download/{0}/{1}" )
-    if OnWindows() or OnCygwin():
-      dotnetversion_output = CheckOutput( [ 'reg', 'query',
-          'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\NET Framework Setup'
-          '\\NDP\\v4\\full',
-          '/v', 'version' ] )
-      dotnet_46_pattern = re.compile( 'version\\s*REG_SZ\\s*4.[67].\\d*' )
-
-      if ( dotnet_46_pattern.search( ToUnicode( dotnetversion_output ) ) ):
-        if platform.machine().endswith( '64' ):
-          url_file = 'omnisharp.http-win-x64.zip'
-        else:
-          url_file = 'omnisharp.http-win-x86.zip'
-      else:
-        sys.exit( 'ERROR: .NET 4.6 or .NET 4.7'
-                  ' is required to set up Roslyn Omnisharp.' )
-    else:
-      # TODO - improve this check
-      libuv_output = CheckOutput(
-              [ 'gcc', '-luv' ], stderr = subprocess.STDOUT )
-      if 'library not found for -luv' in ToUnicode( libuv_output ):
-        sys.exit( 'ERROR: libuv is required to set up Roslyn Omnisharp.' )
-      if FindExecutable( 'mono' ): # TODO: min version?
-        url_file = 'omnisharp.http-mono.tar.gz'
-      elif FindExecutable( 'dotnet' ): # TODO: min version?
-        if OnMac():
-          url_file = 'omnisharp.http-osx.tar.gz'
-        else:
-          url_file = 'omnisharp.http-linux-x64.tar.gz' # TODO x86?
-      else:
-        sys.exit( 'ERROR: Mono or .NET Core is required '
-                  'to set up Roslyn Omnisharp.' )
+    version = "v1.28.0"
+    url_file = GetCsCompleterFileNameForPlatform()
 
     try:
       os.mkdir( version )
@@ -737,9 +690,7 @@ def EnableNewCsCompleter( args ):
       with open( file_path, 'wb' ) as fh:
         fh.write( result.content )
 
-    if OnCygwin():
-      extract_command = [ 'unzip', '-o', file_path ]
-    elif OnWindows():
+    if OnWindows():
       try:
         import _winreg
       except ImportError:
@@ -756,14 +707,42 @@ def EnableNewCsCompleter( args ):
       extract_command = [ 'tar', 'xfv', file_path ]
 
     subprocess.check_call( extract_command )
-
-    if OnCygwin():
-      import glob
-      exes = glob.glob( '*.exe' )
-      dlls = glob.glob( '*.dll' )
-      subprocess.check_call( [ "chmod", "a+x" ] + exes + dlls )
   finally:
     os.chdir( DIR_OF_THIS_SCRIPT )
+
+
+def GetCsCompleterFileNameForPlatform():
+  if OnWindows():
+    dotnetversion_output = CheckOutput( [ 'reg', 'query',
+      'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\NET Framework Setup'
+      '\\NDP\\v4\\full',
+      '/v', 'version' ] )
+    dotnet_46_pattern = re.compile( 'version\\s*REG_SZ\\s*4.[67].\\d*' )
+
+    if ( dotnet_46_pattern.search( ToUnicode( dotnetversion_output ) ) ):
+      if platform.machine().endswith( '64' ):
+        return 'omnisharp.http-win-x64.zip'
+      else:
+        return 'omnisharp.http-win-x86.zip'
+    else:
+      sys.exit( 'ERROR: .NET 4.6 or .NET 4.7'
+                ' is required to set up Roslyn Omnisharp.' )
+  else:
+    # TODO - improve this check
+    libuv_output = CheckOutput(
+      [ 'gcc', '-luv' ], stderr = subprocess.STDOUT )
+    if 'library not found for -luv' in ToUnicode( libuv_output ):
+      sys.exit( 'ERROR: libuv is required to set up Roslyn Omnisharp.' )
+    if FindExecutable( 'mono' ): # TODO: min version?
+      return 'omnisharp.http-mono.tar.gz'
+    elif FindExecutable( 'dotnet' ): # TODO: min version?
+      if OnMac():
+        return 'omnisharp.http-osx.tar.gz'
+      else:
+        return 'omnisharp.http-linux-x64.tar.gz' # TODO x86?
+    else:
+      sys.exit( 'ERROR: Mono or .NET Core is required '
+                'to set up Roslyn Omnisharp.' )
 
 
 def ToUnicode( value ):
@@ -1010,9 +989,7 @@ def Main():
   if not args.skip_build or not args.no_regex:
     DoCmakeBuilds( args )
   if args.cs_completer or args.omnisharp_completer or args.all_completers:
-    EnableLegacyCsCompleter( args )
-  if args.new_cs_completer or args.all_completers:
-    EnableNewCsCompleter( args )
+    EnableCsCompleter( args )
   if args.go_completer or args.gocode_completer or args.all_completers:
     EnableGoCompleter( args )
   if args.js_completer or args.tern_completer or args.all_completers:
