@@ -720,6 +720,7 @@ def GetSevenZipPath():
         return p.join( seven_zip_path, '7z.exe' )
 
 
+USE_MONO_PACKAGE = False
 def GetCsCompleterFileNameForPlatform():
   if OnWindows():
     dotnetversion_output = CheckOutput( [ 'reg', 'query',
@@ -742,13 +743,15 @@ def GetCsCompleterFileNameForPlatform():
       [ 'gcc', '-luv' ], stderr = subprocess.STDOUT )
     if 'library not found for -luv' in ToUnicode( libuv_output ):
       sys.exit( 'ERROR: libuv is required to set up Roslyn Omnisharp.' )
-    if FindExecutable( 'mono' ): # TODO: min version?
+    if USE_MONO_PACKAGE and FindExecutable( 'mono' ): # TODO: min version?
       return 'omnisharp.http-mono.tar.gz'
     else:
       if OnMac():
         return 'omnisharp.http-osx.tar.gz'
+      elif platform.machine().endswith( '64' ):
+        return 'omnisharp.http-linux-x64.tar.gz'
       else:
-        return 'omnisharp.http-linux-x64.tar.gz' # TODO x86?
+        return 'omnisharp.http-linux-x86.tar.gz'
 
 
 def ToUnicode( value ):
