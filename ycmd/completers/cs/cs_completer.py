@@ -49,9 +49,9 @@ PATH_TO_ROSLYN_OMNISHARP = os.path.join(
 PATH_TO_ROSLYN_OMNISHARP_BINARY = os.path.join(
   PATH_TO_ROSLYN_OMNISHARP, 'Omnisharp.exe' )
 if ( not os.path.isfile( PATH_TO_ROSLYN_OMNISHARP_BINARY )
-     and os.path.isfile( os.join( PATH_TO_ROSLYN_OMNISHARP, 'Run' ) ) ):
+     and os.path.isfile( os.path.join( PATH_TO_ROSLYN_OMNISHARP, 'run' ) ) ):
   PATH_TO_ROSLYN_OMNISHARP_BINARY = (
-    os.join( PATH_TO_ROSLYN_OMNISHARP, 'Run' ) )
+    os.path.join( PATH_TO_ROSLYN_OMNISHARP, 'run' ) )
 LOGFILE_FORMAT = 'omnisharp_{port}_{sln}_{std}_'
 
 

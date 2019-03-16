@@ -670,7 +670,7 @@ def EnableCsCompleter( args ):
 
     url_pattern = ( "https://github.com/OmniSharp/omnisharp-roslyn/"
                     "releases/download/{0}/{1}" )
-    version = "v1.32.8"
+    version = "v1.32.1"
     url_file = GetCsCompleterFileNameForPlatform()
 
     CleanCsCompleter( build_dir, version )
@@ -744,14 +744,11 @@ def GetCsCompleterFileNameForPlatform():
       sys.exit( 'ERROR: libuv is required to set up Roslyn Omnisharp.' )
     if FindExecutable( 'mono' ): # TODO: min version?
       return 'omnisharp.http-mono.tar.gz'
-    elif FindExecutable( 'dotnet' ): # TODO: min version?
+    else:
       if OnMac():
         return 'omnisharp.http-osx.tar.gz'
       else:
         return 'omnisharp.http-linux-x64.tar.gz' # TODO x86?
-    else:
-      sys.exit( 'ERROR: Mono or .NET Core is required '
-                'to set up Roslyn Omnisharp.' )
 
 
 def ToUnicode( value ):
