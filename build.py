@@ -710,17 +710,17 @@ def CleanCsCompleter( build_dir, version ):
 
 
 def GetSevenZipPath():
-    try:
-      import _winreg
-    except ImportError:
-      import winreg as _winreg
+  try:
+    import _winreg
+  except ImportError:
+    import winreg as _winreg
 
-    wow64 = _winreg.KEY_READ | _winreg.KEY_WOW64_64KEY
-    with _winreg.ConnectRegistry( None, _winreg.HKEY_LOCAL_MACHINE ) as LM:
-      with _winreg.OpenKey( LM, 'SOFTWARE', 0, wow64 ) as S:
-        with _winreg.OpenKey( S, '7-Zip', 0, wow64 ) as SZ:
-          seven_zip_path = _winreg.QueryValueEx( SZ, 'Path' )[ 0 ]
-          return p.join( seven_zip_path, '7z.exe' )
+  wow64 = _winreg.KEY_READ | _winreg.KEY_WOW64_64KEY
+  with _winreg.ConnectRegistry( None, _winreg.HKEY_LOCAL_MACHINE ) as LM:
+    with _winreg.OpenKey( LM, 'SOFTWARE', 0, wow64 ) as S:
+      with _winreg.OpenKey( S, '7-Zip', 0, wow64 ) as SZ:
+        seven_zip_path = _winreg.QueryValueEx( SZ, 'Path' )[ 0 ]
+        return p.join( seven_zip_path, '7z.exe' )
 
 
 def GetCsCompleterFileNameForPlatform():
