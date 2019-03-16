@@ -1,4 +1,4 @@
-# Copyright (C) 2011, 2012, 2013 Google Inc.
+# Copyright (C) 2011-2018 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -24,7 +24,6 @@ from builtins import *  # noqa
 
 import abc
 import threading
-from ycmd.utils import ForceSemanticCompletion
 from ycmd.completers import completer_utils
 from ycmd.responses import NoDiagnosticSupport
 from future.utils import with_metaclass
@@ -122,7 +121,11 @@ class Completer( with_metaclass( abc.ABCMeta, object ) ):
   ycmd.responses.BuildCompletionData to build the detailed response. See
   clang_completer.py to see how its used in practice.
 
-  Again, you probably want to override ComputeCandidatesInner().
+  Again, you probably want to override ComputeCandidatesInner(). If computing
+  the fields of the candidates is costly, you should consider building only the
+  "insertion_text" field in ComputeCandidatesInner() then fill the remaining
+  fields in DetailCandidates() which is called after the filtering is done. See
+  python_completer.py for an example.
 
   You also need to implement the SupportedFiletypes() function which should
   return a list of strings, where the strings are Vim filetypes your completer
@@ -170,6 +173,8 @@ class Completer( with_metaclass( abc.ABCMeta, object ) ):
   def __init__( self, user_options ):
     self.user_options = user_options
     self.min_num_chars = user_options[ 'min_num_of_chars_for_completion' ]
+    self.max_diagnostics_to_display = user_options[
+        'max_diagnostics_to_display' ]
     self.prepared_triggers = (
         completer_utils.PreparedTriggers(
             user_trigger_map = user_options[ 'semantic_triggers' ],
@@ -177,10 +182,6 @@ class Completer( with_metaclass( abc.ABCMeta, object ) ):
         if user_options[ 'auto_trigger' ] else None )
     self._completions_cache = CompletionsCache()
     self._max_candidates = user_options[ 'max_num_candidates' ]
-
-
-  def CompletionType( self, request_data ):
-    return 0
 
 
   # It's highly likely you DON'T want to override this function but the *Inner
@@ -194,9 +195,7 @@ class Completer( with_metaclass( abc.ABCMeta, object ) ):
     # call because we have to ensure a different thread doesn't change the cache
     # data.
     cache_completions = self._completions_cache.GetCompletionsIfCacheValid(
-        request_data[ 'line_num' ],
-        request_data[ 'start_column' ],
-        self.CompletionType( request_data ) )
+      request_data )
 
     # If None, then the cache isn't valid and we know we should return true
     if cache_completions is None:
@@ -229,30 +228,30 @@ class Completer( with_metaclass( abc.ABCMeta, object ) ):
   # It's highly likely you DON'T want to override this function but the *Inner
   # version of it.
   def ComputeCandidates( self, request_data ):
-    if ( not ForceSemanticCompletion( request_data ) and
+    if ( not request_data[ 'force_semantic' ] and
          not self.ShouldUseNow( request_data ) ):
       return []
 
     candidates = self._GetCandidatesFromSubclass( request_data )
-    return self.FilterAndSortCandidates( candidates, request_data[ 'query' ] )
+    candidates = self.FilterAndSortCandidates( candidates,
+                                               request_data[ 'query' ] )
+    return self.DetailCandidates( request_data, candidates )
 
 
   def _GetCandidatesFromSubclass( self, request_data ):
     cache_completions = self._completions_cache.GetCompletionsIfCacheValid(
-          request_data[ 'line_num' ],
-          request_data[ 'start_column' ],
-          self.CompletionType( request_data ) )
+      request_data )
 
     if cache_completions:
       return cache_completions
-    else:
-      raw_completions = self.ComputeCandidatesInner( request_data )
-      self._completions_cache.Update(
-          request_data[ 'line_num' ],
-          request_data[ 'start_column' ],
-          self.CompletionType( request_data ),
-          raw_completions )
-      return raw_completions
+
+    raw_completions = self.ComputeCandidatesInner( request_data )
+    self._completions_cache.Update( request_data, raw_completions )
+    return raw_completions
+
+
+  def DetailCandidates( self, request_data, candidates ):
+    return candidates
 
 
   def ComputeCandidatesInner( self, request_data ):
@@ -370,7 +369,7 @@ class Completer( with_metaclass( abc.ABCMeta, object ) ):
       if filetype in supported:
         return filetype
 
-    return filetypes[0]
+    return filetypes[ 0 ]
 
 
   @abc.abstractmethod
@@ -409,8 +408,7 @@ class Completer( with_metaclass( abc.ABCMeta, object ) ):
 
 
 class CompletionsCache( object ):
-  """Completions for a particular request. Importantly, columns are byte
-  offsets, not unicode codepoints."""
+  """Cache of computed completions for a particular request."""
 
   def __init__( self ):
     self._access_lock = threading.Lock()
@@ -419,33 +417,18 @@ class CompletionsCache( object ):
 
   def Invalidate( self ):
     with self._access_lock:
-      self._line_num = None
-      self._start_column = None
-      self._completion_type = None
+      self._request_data = None
       self._completions = None
 
 
-  # start_column is a byte offset.
-  def Update( self, line_num, start_column, completion_type, completions ):
+  def Update( self, request_data, completions ):
     with self._access_lock:
-      self._line_num = line_num
-      self._start_column = start_column
-      self._completion_type = completion_type
+      self._request_data = request_data
       self._completions = completions
 
 
-  # start_column is a byte offset.
-  def GetCompletionsIfCacheValid( self, line_num, start_column,
-                                  completion_type ):
+  def GetCompletionsIfCacheValid( self, request_data ):
     with self._access_lock:
-      if not self._CacheValidNoLock( line_num, start_column,
-                                     completion_type ):
-        return None
-      return self._completions
-
-
-  # start_column is a byte offset.
-  def _CacheValidNoLock( self, line_num, start_column, completion_type ):
-    return ( line_num == self._line_num and
-             start_column == self._start_column and
-             completion_type == self._completion_type )
+      if self._request_data and self._request_data == request_data:
+        return self._completions
+      return None

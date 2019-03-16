@@ -1,5 +1,4 @@
-# Copyright (C) 2013 Google Inc.
-#               2015 ycmd contributors
+# Copyright (C) 2013-2018 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -37,17 +36,24 @@ import tempfile
 import time
 import stat
 import shutil
+import json
 
 from ycmd import extra_conf_store, handlers, user_options_store
 from ycmd.completers.completer import Completer
 from ycmd.responses import BuildCompletionData
-from ycmd.utils import GetCurrentDirectory, OnMac, OnWindows, ToUnicode
+from ycmd.utils import ( GetCurrentDirectory,
+                         OnMac,
+                         OnWindows,
+                         ToUnicode,
+                         WaitUntilProcessIsTerminated )
 import ycm_core
 
 try:
   from unittest import skipIf
 except ImportError:
   from unittest2 import skipIf
+
+TESTS_DIR = os.path.abspath( os.path.dirname( __file__ ) )
 
 Py2Only = skipIf( not PY2, 'Python 2 only' )
 Py3Only = skipIf( PY2, 'Python 3 only' )
@@ -62,6 +68,7 @@ def BuildRequest( **kwargs ):
   filepath = kwargs[ 'filepath' ] if 'filepath' in kwargs else '/foo'
   contents = kwargs[ 'contents' ] if 'contents' in kwargs else ''
   filetype = kwargs[ 'filetype' ] if 'filetype' in kwargs else 'foo'
+  filetypes = kwargs[ 'filetypes' ] if 'filetypes' in kwargs else [ filetype ]
 
   request = {
     'line_num': 1,
@@ -70,7 +77,7 @@ def BuildRequest( **kwargs ):
     'file_data': {
       filepath: {
         'contents': contents,
-        'filetypes': [ filetype ]
+        'filetypes': filetypes
       }
     }
   }
@@ -86,6 +93,12 @@ def BuildRequest( **kwargs ):
       request[ key ] = value
 
   return request
+
+
+def CombineRequest( request, data ):
+  kwargs = request.copy()
+  kwargs.update( data )
+  return BuildRequest( **kwargs )
 
 
 def ErrorMatcher( cls, msg = None ):
@@ -112,12 +125,6 @@ def CompletionEntryMatcher( insertion_text,
   return has_entries( match )
 
 
-def CompletionLocationMatcher( location_type, value ):
-  return has_entry( 'extra_data',
-                    has_entry( 'location',
-                               has_entry( location_type, value ) ) )
-
-
 def MessageMatcher( msg ):
   return has_entry( 'message', contains_string( msg ) )
 
@@ -127,6 +134,13 @@ def LocationMatcher( filepath, line_num, column_num ):
     'line_num': line_num,
     'column_num': column_num,
     'filepath': filepath
+  } )
+
+
+def RangeMatcher( filepath, start, end ):
+  return has_entries( {
+    'start': LocationMatcher( filepath, *start ),
+    'end': LocationMatcher( filepath, *end ),
   } )
 
 
@@ -193,14 +207,24 @@ def SetUpApp( custom_options = {} ):
 
 
 @contextlib.contextmanager
+def IgnoreExtraConfOutsideTestsFolder():
+  with patch( 'ycmd.utils.IsRootDirectory',
+              lambda path, parent: path in [ parent, TESTS_DIR ] ):
+    yield
+
+
+@contextlib.contextmanager
 def IsolatedApp( custom_options = {} ):
   old_server_state = handlers._server_state
   old_extra_conf_store_state = extra_conf_store.Get()
+  old_options = user_options_store.GetAll()
   try:
-    yield SetUpApp( custom_options )
+    with IgnoreExtraConfOutsideTestsFolder():
+      yield SetUpApp( custom_options )
   finally:
     handlers._server_state = old_server_state
     extra_conf_store.Set( old_extra_conf_store_state )
+    user_options_store.SetAll( old_options )
 
 
 def StartCompleterServer( app, filetype, filepath = '/foo' ):
@@ -229,6 +253,12 @@ def WaitUntilCompleterServerReady( app, filetype, timeout = 30 ):
       return
 
     time.sleep( 0.1 )
+
+
+def MockProcessTerminationTimingOut( handle, timeout = 5 ):
+  WaitUntilProcessIsTerminated( handle, timeout )
+  raise RuntimeError( 'Waited process to terminate for {0} seconds, '
+                      'aborting.'.format( timeout ) )
 
 
 def ClearCompletionsCache():
@@ -319,3 +349,58 @@ def TemporaryTestDir():
     yield tmp_dir
   finally:
     shutil.rmtree( tmp_dir )
+
+
+def WithRetry( test ):
+  """Decorator to be applied to tests that retries the test over and over
+  until it passes or |timeout| seconds have passed."""
+
+  if 'YCM_TEST_NO_RETRY' in os.environ:
+    return test
+
+  @functools.wraps( test )
+  def wrapper( *args, **kwargs ):
+    expiry = time.time() + 30
+    while True:
+      try:
+        test( *args, **kwargs )
+        return
+      except Exception as test_exception:
+        if time.time() > expiry:
+          raise
+        print( 'Test failed, retrying: {0}'.format( str( test_exception ) ) )
+        time.sleep( 0.25 )
+  return wrapper
+
+
+@contextlib.contextmanager
+def TemporaryClangProject( tmp_dir, compile_commands ):
+  """Context manager to create a compilation database in a directory and delete
+  it when the test completes. |tmp_dir| is the directory in which to create the
+  database file (typically used in conjunction with |TemporaryTestDir|) and
+  |compile_commands| is a python object representing the compilation database.
+
+  e.g.:
+    with TemporaryTestDir() as tmp_dir:
+      database = [
+        {
+          'directory': os.path.join( tmp_dir, dir ),
+          'command': compiler_invocation,
+          'file': os.path.join( tmp_dir, dir, filename )
+        },
+        ...
+      ]
+      with TemporaryClangProject( tmp_dir, database ):
+        <test here>
+
+  The context manager does not yield anything.
+  """
+  path = os.path.join( tmp_dir, 'compile_commands.json' )
+
+  with open( path, 'w' ) as f:
+    f.write( ToUnicode( json.dumps( compile_commands, indent=2 ) ) )
+
+  try:
+    yield
+  finally:
+    os.remove( path )

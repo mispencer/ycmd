@@ -1,4 +1,4 @@
-// Copyright (C) 2017 ycmd contributors
+// Copyright (C) 2017-2018 ycmd contributors
 //
 // This file is part of ycmd.
 //
@@ -15,79 +15,35 @@
 // You should have received a copy of the GNU General Public License
 // along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
-#include <gtest/gtest.h>
+#include "TestUtils.h"
 #include "Utils.h"
+
+#include <gtest/gtest.h>
 
 namespace YouCompleteMe {
 
-TEST( UtilsTest, IsAcii ) {
-  EXPECT_TRUE( IsAscii( '\x00' ) );
-  EXPECT_TRUE( IsAscii( '\x7f' ) );
+class UtilsTest : public ::testing::Test {
+protected:
+  virtual void SetUp() {
+    // The returned temporary path is a symlink on macOS.
+    tmp_dir = fs::canonical( fs::temp_directory_path() ) / fs::unique_path();
+    existing_path = tmp_dir / "existing_path";
+    symlink = tmp_dir / "symlink";
+    fs::create_directories( existing_path );
+    fs::create_directory_symlink( existing_path, symlink );
+  }
 
-  EXPECT_FALSE( IsAscii( '\x80' ) );
-  EXPECT_FALSE( IsAscii( '\xff' ) );
-}
+  virtual void TearDown() {
+    fs::remove_all( tmp_dir );
+  }
 
-TEST( UtilsTest, IsAlpha ) {
-  EXPECT_TRUE( IsAlpha( 'a' ) );
-  EXPECT_TRUE( IsAlpha( 'm' ) );
-  EXPECT_TRUE( IsAlpha( 'z' ) );
-  EXPECT_TRUE( IsAlpha( 'A' ) );
-  EXPECT_TRUE( IsAlpha( 'M' ) );
-  EXPECT_TRUE( IsAlpha( 'Z' ) );
+  fs::path tmp_dir;
+  fs::path existing_path;
+  fs::path symlink;
+};
 
-  EXPECT_FALSE( IsAlpha( '/' ) );
-  EXPECT_FALSE( IsAlpha( '*' ) );
-  EXPECT_FALSE( IsAlpha( '.' ) );
-}
 
-TEST( UtilsTest, IsPrintable ) {
-  EXPECT_TRUE( IsPrintable( 'b' ) );
-  EXPECT_TRUE( IsPrintable( 'R' ) );
-  EXPECT_TRUE( IsPrintable( '&' ) );
-  EXPECT_TRUE( IsPrintable( '(' ) );
-
-  EXPECT_FALSE( IsPrintable( '\b' ) );
-  EXPECT_FALSE( IsPrintable( '\n' ) );
-  EXPECT_FALSE( IsPrintable( '\r' ) );
-  EXPECT_FALSE( IsPrintable( '\f' ) );
-
-  EXPECT_TRUE( IsPrintable( "Is Printable" ) );
-
-  EXPECT_FALSE( IsPrintable( "Not\nPrintable" ) );
-}
-
-TEST( UtilsTest, IsPunctuation ) {
-  EXPECT_TRUE( IsPunctuation( '-' ) );
-  EXPECT_TRUE( IsPunctuation( '_' ) );
-  EXPECT_TRUE( IsPunctuation( '!' ) );
-  EXPECT_TRUE( IsPunctuation( '<' ) );
-
-  EXPECT_FALSE( IsPunctuation( 'c' ) );
-  EXPECT_FALSE( IsPunctuation( 'I' ) );
-  EXPECT_FALSE( IsPunctuation( '0' ) );
-  EXPECT_FALSE( IsPunctuation( '\t' ) );
-}
-
-TEST( UtilsTest, IsLowercase ) {
-  EXPECT_TRUE( IsLowercase( 'a' ) );
-  EXPECT_TRUE( IsLowercase( 'm' ) );
-  EXPECT_TRUE( IsLowercase( 'z' ) );
-
-  EXPECT_FALSE( IsLowercase( 'A' ) );
-  EXPECT_FALSE( IsLowercase( 'M' ) );
-  EXPECT_FALSE( IsLowercase( 'Z' ) );
-
-  EXPECT_FALSE( IsLowercase( ']' ) );
-  EXPECT_FALSE( IsLowercase( '+' ) );
-  EXPECT_FALSE( IsLowercase( '\a' ) );
-
-  EXPECT_TRUE( IsLowercase( "is-lowercase" ) );
-
-  EXPECT_FALSE( IsLowercase( "NotLowerCase" ) );
-}
-
-TEST( UtilsTest, IsUppercase ) {
+TEST_F( UtilsTest, IsUppercase ) {
   EXPECT_TRUE( IsUppercase( 'A' ) );
   EXPECT_TRUE( IsUppercase( 'B' ) );
   EXPECT_TRUE( IsUppercase( 'Z' ) );
@@ -101,7 +57,7 @@ TEST( UtilsTest, IsUppercase ) {
   EXPECT_FALSE( IsUppercase( '~' ) );
 }
 
-TEST( UtilsTest, Lowercase ) {
+TEST_F( UtilsTest, Lowercase ) {
   EXPECT_EQ( Lowercase( 'a' ), 'a' );
   EXPECT_EQ( Lowercase( 'z' ), 'z' );
   EXPECT_EQ( Lowercase( 'A' ), 'a' );
@@ -111,28 +67,28 @@ TEST( UtilsTest, Lowercase ) {
   EXPECT_EQ( Lowercase( "lOwER_CasE" ), "lower_case" );
 }
 
-TEST( UtilsTest, Uppercase ) {
-  EXPECT_EQ( Uppercase( 'a' ), 'A' );
-  EXPECT_EQ( Uppercase( 'z' ), 'Z' );
-  EXPECT_EQ( Uppercase( 'A' ), 'A' );
-  EXPECT_EQ( Uppercase( 'Z' ), 'Z' );
-  EXPECT_EQ( Uppercase( '`' ), '`' );
+
+TEST_F( UtilsTest, NormalizePath ) {
+  EXPECT_THAT( NormalizePath( "" ),   Equals( fs::current_path() ) );
+  EXPECT_THAT( NormalizePath( "." ),  Equals( fs::current_path() ) );
+  EXPECT_THAT( NormalizePath( "./" ), Equals( fs::current_path() ) );
+  EXPECT_THAT( NormalizePath( existing_path ),       Equals( existing_path ) );
+  EXPECT_THAT( NormalizePath( "", existing_path ),   Equals( existing_path ) );
+  EXPECT_THAT( NormalizePath( ".", existing_path ),  Equals( existing_path ) );
+  EXPECT_THAT( NormalizePath( "./", existing_path ), Equals( existing_path ) );
+  EXPECT_THAT( NormalizePath( symlink ),             Equals( existing_path ) );
+  EXPECT_THAT( NormalizePath( "", symlink ),         Equals( existing_path ) );
+  EXPECT_THAT( NormalizePath( ".", symlink ),        Equals( existing_path ) );
+  EXPECT_THAT( NormalizePath( "./", symlink ),       Equals( existing_path ) );
+  EXPECT_THAT( NormalizePath( existing_path / "foo/../bar/./xyz//" ),
+               Equals( existing_path / "bar" / "xyz" ) );
+  EXPECT_THAT( NormalizePath( "foo/../bar/./xyz//", existing_path ),
+               Equals( existing_path / "bar" / "xyz" ) );
+  EXPECT_THAT( NormalizePath( symlink / "foo/../bar/./xyz//" ),
+               Equals( existing_path / "bar" / "xyz" ) );
+  EXPECT_THAT( NormalizePath( "foo/../bar/./xyz//", symlink ),
+               Equals( existing_path / "bar" / "xyz" ) );
 }
 
-TEST( UtilsTest, HasUppercase ) {
-  EXPECT_TRUE( HasUppercase( "HasUppercase" ) );
-
-  EXPECT_FALSE( HasUppercase( "has_uppercase" ) );
-}
-
-TEST( UtilsTest, SwapCase ) {
-  EXPECT_EQ( SwapCase( 'a' ), 'A' );
-  EXPECT_EQ( SwapCase( 'z' ), 'Z' );
-  EXPECT_EQ( SwapCase( 'A' ), 'a' );
-  EXPECT_EQ( SwapCase( 'Z' ), 'z' );
-  EXPECT_EQ( SwapCase( '/' ), '/' );
-
-  EXPECT_EQ( SwapCase( "SwAp_CasE" ), "sWaP_cASe" );
-}
 
 } // namespace YouCompleteMe

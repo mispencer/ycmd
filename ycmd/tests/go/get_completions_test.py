@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-# Copyright (C) 2015 ycmd contributors
+# Copyright (C) 2015-2018 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -24,11 +24,10 @@ from __future__ import division
 # Not installing aliases from python-future; it's unreliable and slow.
 from builtins import *  # noqa
 
-from hamcrest import assert_that, contains_string, has_item, has_items
+from hamcrest import all_of, assert_that, has_item, has_items
 
 from ycmd.tests.go import PathToTestFile, SharedYcmd
-from ycmd.tests.test_utils import ( BuildRequest, CompletionEntryMatcher,
-                                    ExpectedFailure )
+from ycmd.tests.test_utils import BuildRequest, CompletionEntryMatcher
 from ycmd.utils import ReadFile
 
 
@@ -40,12 +39,28 @@ def GetCompletions_Basic_test( app ):
                                   contents = ReadFile( filepath ),
                                   force_semantic = True,
                                   line_num = 9,
+                                  column_num = 9 )
+
+  results = app.post_json( '/completions',
+                           completion_data ).json[ 'completions' ]
+  assert_that( results,
+               all_of(
+                 has_items(
+                   CompletionEntryMatcher( 'Llongfile', 'untyped int' ),
+                   CompletionEntryMatcher( 'Logger', 'struct' ) ) ) )
+  completion_data = BuildRequest( filepath = filepath,
+                                  filetype = 'go',
+                                  contents = ReadFile( filepath ),
+                                  force_semantic = True,
+                                  line_num = 9,
                                   column_num = 11 )
 
   results = app.post_json( '/completions',
                            completion_data ).json[ 'completions' ]
   assert_that( results,
-               has_item( CompletionEntryMatcher( u'Logger' ) ) )
+               all_of(
+                 has_item(
+                   CompletionEntryMatcher( 'Logger', 'struct' ) ) ) )
 
 
 @SharedYcmd
@@ -65,11 +80,6 @@ def GetCompletions_Unicode_InLine_test( app ):
                           CompletionEntryMatcher( u'Sprintf' ) ) )
 
 
-@ExpectedFailure( 'Filtering and sorting does not support candidates with '
-                  'non-ASCII characters.',
-                  contains_string( "but: a sequence containing a dictionary "
-                                   "containing {'insertion_text': 'Unicøde'} "
-                                   "was <[]>" ) )
 @SharedYcmd
 def GetCompletions_Unicode_Identifier_test( app ):
   filepath = PathToTestFile( 'unicode.go' )

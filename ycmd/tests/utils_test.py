@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-# Copyright (C) 2016  ycmd contributors.
+# Copyright (C) 2016-2019 ycmd contributors.
 #
 # This file is part of ycmd.
 #
@@ -29,15 +29,23 @@ import subprocess
 import tempfile
 import ycm_core
 from future.utils import native
-from hamcrest import assert_that, equal_to, has_property, instance_of
+from hamcrest import ( assert_that,
+                       calling,
+                       empty,
+                       equal_to,
+                       has_length,
+                       has_property,
+                       instance_of,
+                       raises )
 from mock import patch, call
-from nose.tools import eq_, ok_, raises
+from nose.tools import eq_, ok_
 from types import ModuleType
 from ycmd import utils
 from ycmd.tests.test_utils import ( Py2Only, Py3Only, WindowsOnly, UnixOnly,
                                     CurrentWorkingDirectory,
                                     TemporaryExecutable )
 from ycmd.tests import PathToTestFile
+from ycmd.utils import ImportAndCheckCore
 
 # NOTE: isinstance() vs type() is carefully used in this test file. Before
 # changing things here, read the comments in utils.ToBytes.
@@ -202,14 +210,16 @@ def JoinLinesAsUnicode_Str_test():
 
 
 def JoinLinesAsUnicode_EmptyList_test():
-  value = utils.JoinLinesAsUnicode( [ ] )
+  value = utils.JoinLinesAsUnicode( [] )
   eq_( value, u'' )
   ok_( isinstance( value, str ) )
 
 
-@raises( ValueError )
 def JoinLinesAsUnicode_BadInput_test():
-  utils.JoinLinesAsUnicode( [ 42 ] )
+  assert_that(
+    calling( utils.JoinLinesAsUnicode ).with_args( [ 42 ] ),
+    raises( ValueError, 'lines must contain either strings or bytes' )
+  )
 
 
 @Py2Only
@@ -404,6 +414,41 @@ def PathsToAllParentFolders_WindowsPath_test():
   ], list( utils.PathsToAllParentFolders( r'C:\\foo\\goo\\zoo\\test.c' ) ) )
 
 
+def PathLeftSplit_test():
+  # Tuples of ( path, expected_result ) for utils.PathLeftSplit.
+  tests = [
+    ( '',              ( '', '' ) ),
+    ( 'foo',           ( 'foo', '' ) ),
+    ( 'foo/bar',       ( 'foo', 'bar' ) ),
+    ( 'foo/bar/xyz',   ( 'foo', 'bar/xyz' ) ),
+    ( 'foo/bar/xyz/',  ( 'foo', 'bar/xyz' ) ),
+    ( '/',             ( '/', '' ) ),
+    ( '/foo',          ( '/', 'foo' ) ),
+    ( '/foo/bar',      ( '/', 'foo/bar' ) ),
+    ( '/foo/bar/xyz',  ( '/', 'foo/bar/xyz' ) ),
+    ( '/foo/bar/xyz/', ( '/', 'foo/bar/xyz' ) )
+  ]
+  for test in tests:
+    yield lambda test: eq_( utils.PathLeftSplit( test[ 0 ] ), test[ 1 ] ), test
+
+
+@WindowsOnly
+def PathLeftSplit_Windows_test():
+  # Tuples of ( path, expected_result ) for utils.PathLeftSplit.
+  tests = [
+    ( 'foo\\bar',            ( 'foo', 'bar' ) ),
+    ( 'foo\\bar\\xyz',       ( 'foo', 'bar\\xyz' ) ),
+    ( 'foo\\bar\\xyz\\',     ( 'foo', 'bar\\xyz' ) ),
+    ( 'C:\\',                ( 'C:\\', '' ) ),
+    ( 'C:\\foo',             ( 'C:\\', 'foo' ) ),
+    ( 'C:\\foo\\bar',        ( 'C:\\', 'foo\\bar' ) ),
+    ( 'C:\\foo\\bar\\xyz',   ( 'C:\\', 'foo\\bar\\xyz' ) ),
+    ( 'C:\\foo\\bar\\xyz\\', ( 'C:\\', 'foo\\bar\\xyz' ) )
+  ]
+  for test in tests:
+    yield lambda test: eq_( utils.PathLeftSplit( test[ 0 ] ), test[ 1 ] ), test
+
+
 def OpenForStdHandle_PrintDoesntThrowException_test():
   try:
     temp = PathToTestFile( 'open-for-std-handle' )
@@ -493,16 +538,17 @@ def SplitLines_test():
     ( ' \n', [ ' ', '' ] ),
     ( ' \n ', [ ' ', ' ' ] ),
     ( 'test\n', [ 'test', '' ] ),
-    ( '\r', [ '', '' ] ),
-    ( '\r ', [ '', ' ' ] ),
-    ( 'test\r', [ 'test', '' ] ),
-    ( '\n\r', [ '', '', '' ] ),
-    ( '\r\n', [ '', '' ] ),
-    ( '\r\n\n', [ '', '', '' ] ),
-    # Other behaviors are just the behavior of splitlines, so just a couple of
-    # tests to prove that we don't mangle it.
+    # Ignore \r on purpose.
+    ( '\r', [ '\r' ] ),
+    ( '\r ', [ '\r ' ] ),
+    ( 'test\r', [ 'test\r' ] ),
+    ( '\n\r', [ '', '\r' ] ),
+    ( '\r\n', [ '\r', '' ] ),
+    ( '\r\n\n', [ '\r', '', '' ] ),
     ( 'test\ntesting', [ 'test', 'testing' ] ),
     ( '\ntesting', [ '', 'testing' ] ),
+    # Do not split lines on \f and \v characters.
+    ( '\f\n\v', [ '\f', '\v' ] )
   ]
 
   for test in tests:
@@ -549,6 +595,16 @@ def FindExecutable_AdditionalPathExt_test():
     eq_( executable, utils.FindExecutable( executable ) )
 
 
+@patch( 'ycmd.utils.ProcessIsRunning', return_value = True )
+def WaitUntilProcessIsTerminated_TimedOut_test( *args ):
+  assert_that(
+    calling( utils.WaitUntilProcessIsTerminated ).with_args( None,
+                                                             timeout = 0 ),
+    raises( RuntimeError,
+            'Waited process to terminate for 0 seconds, aborting.' )
+  )
+
+
 def LoadPythonSource_UnicodePath_test():
   filename = PathToTestFile( u'uni¢𐍈d€.py' )
   module = utils.LoadPythonSource( 'module_name', filename )
@@ -569,3 +625,123 @@ def GetCurrentDirectory_Py2NoCurrentDirectory_test():
 def GetCurrentDirectory_Py3NoCurrentDirectory_test():
   with patch( 'os.getcwd', side_effect = FileNotFoundError ): # noqa
     eq_( utils.GetCurrentDirectory(), tempfile.gettempdir() )
+
+
+def HashableDict_Equality_test():
+  dict1 = { 'key': 'value' }
+  dict2 = { 'key': 'another_value' }
+  ok_( utils.HashableDict( dict1 ) == utils.HashableDict( dict1 ) )
+  ok_( not utils.HashableDict( dict1 ) != utils.HashableDict( dict1 ) )
+  ok_( not utils.HashableDict( dict1 ) == dict1 )
+  ok_( utils.HashableDict( dict1 ) != dict1 )
+  ok_( not utils.HashableDict( dict1 ) == utils.HashableDict( dict2 ) )
+  ok_( utils.HashableDict( dict1 ) != utils.HashableDict( dict2 ) )
+
+
+@patch( 'ycmd.utils.LOGGER', autospec = True )
+def RunImportAndCheckCoreException( test, logger ):
+  with patch( 'ycmd.utils.ImportCore',
+              side_effect = ImportError( test[ 'exception_message' ] ) ):
+    assert_that( ImportAndCheckCore(), equal_to( test[ 'exit_status' ] ) )
+
+  assert_that( logger.method_calls, has_length( 1 ) )
+  logger.exception.assert_called_with( test[ 'logged_message' ] )
+
+
+@patch( 'ycmd.utils.LOGGER', autospec = True )
+def ImportAndCheckCore_Compatible_test( logger ):
+  assert_that( ImportAndCheckCore(), equal_to( 0 ) )
+  assert_that( logger.method_calls, empty() )
+
+
+def ImportAndCheckCore_Unexpected_test():
+  RunImportAndCheckCoreException( {
+    'exception_message': 'unexpected import exception',
+    'exit_status': 3,
+    'logged_message': 'unexpected import exception'
+  } )
+
+
+def ImportAndCheckCore_Missing_test():
+  import_errors = [
+    # Raised by Python 2.
+    'No module named ycm_core',
+    # Raised by Python 3.
+    "No module named 'ycm_core'"
+  ]
+
+  for error in import_errors:
+    yield RunImportAndCheckCoreException, {
+      'exception_message': error,
+      'exit_status': 4,
+      'logged_message': 'ycm_core library not detected; you need to compile it '
+                        'by running the build.py script. See the documentation '
+                        'for more details.'
+    }
+
+
+def ImportAndCheckCore_Python2_test():
+  import_exception_messages = [
+    # Raised on Linux and OS X with Python 3.4.
+    'dynamic module does not define init function (PyInit_ycm_core).',
+    # Raised on Linux and OS X with Python 3.5.
+    'dynamic module does not define module export function (PyInit_ycm_core).',
+    # Raised on Windows.
+    'Module use of python27.dll conflicts with this version of Python.'
+  ]
+
+  for message in import_exception_messages:
+    yield RunImportAndCheckCoreException, {
+      'exception_message': message,
+      'exit_status': 5,
+      'logged_message': 'ycm_core library compiled for Python 2 '
+                        'but loaded in Python 3.'
+    }
+
+
+def ImportAndCheckCore_Python3_test():
+  import_exception_messages = [
+    # Raised on Linux and OS X.
+    'dynamic module does not define init function (initycm_core).',
+    # Raised on Windows.
+    'Module use of python34.dll conflicts with this version of Python.',
+    'Module use of python35.dll conflicts with this version of Python.'
+  ]
+
+  for message in import_exception_messages:
+    yield RunImportAndCheckCoreException, {
+      'exception_message': message,
+      'exit_status': 6,
+      'logged_message': 'ycm_core library compiled for Python 3 '
+                        'but loaded in Python 2.'
+    }
+
+
+@patch( 'ycm_core.YcmCoreVersion', side_effect = AttributeError() )
+@patch( 'ycmd.utils.LOGGER', autospec = True )
+def ImportAndCheckCore_Outdated_NoYcmCoreVersionMethod_test( logger,
+                                                                    *args ):
+  assert_that( ImportAndCheckCore(), equal_to( 7 ) )
+  assert_that( logger.method_calls, has_length( 1 ) )
+  logger.exception.assert_called_with(
+    'ycm_core library too old; PLEASE RECOMPILE by running the build.py '
+    'script. See the documentation for more details.' )
+
+
+@patch( 'ycm_core.YcmCoreVersion', return_value = 10 )
+@patch( 'ycmd.utils.ExpectedCoreVersion', return_value = 11 )
+@patch( 'ycmd.utils.LOGGER', autospec = True )
+def ImportAndCheckCore_Outdated_NoVersionMatch_test( logger, *args ):
+  assert_that( ImportAndCheckCore(), equal_to( 7 ) )
+  assert_that( logger.method_calls, has_length( 1 ) )
+  logger.error.assert_called_with(
+    'ycm_core library too old; PLEASE RECOMPILE by running the build.py '
+    'script. See the documentation for more details.' )
+
+
+@patch( 'ycmd.utils.ListDirectory', return_value = [] )
+def GetClangResourceDir_NotFound_test( *args ):
+  assert_that(
+    calling( utils.GetClangResourceDir ),
+    raises( RuntimeError, 'Cannot find Clang resource directory' )
+  )

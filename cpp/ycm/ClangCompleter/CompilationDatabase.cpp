@@ -17,7 +17,6 @@
 
 #include "CompilationDatabase.h"
 #include "ClangUtils.h"
-#include "ReleaseGil.h"
 #include "PythonSupport.h"
 
 #include <memory>
@@ -36,7 +35,7 @@ using CompileCommandsWrap =
 
 
 CompilationDatabase::CompilationDatabase(
-  const boost::python::object &path_to_directory )
+  const pybind11::object &path_to_directory )
   : is_loaded_( false ),
     path_to_directory_( GetUtf8String( path_to_directory ) ) {
   CXCompilationDatabase_Error status;
@@ -64,14 +63,15 @@ bool CompilationDatabase::AlreadyGettingFlags() {
 
 
 CompilationInfoForFile CompilationDatabase::GetCompilationInfoForFile(
-  const boost::python::object &path_to_file ) {
+  const pybind11::object &path_to_file ) {
   CompilationInfoForFile info;
 
-  if ( !is_loaded_ )
+  if ( !is_loaded_ ) {
     return info;
+  }
 
   std::string path_to_file_string = GetUtf8String( path_to_file );
-  ReleaseGil unlock;
+  pybind11::gil_scoped_release unlock;
 
   lock_guard< mutex > lock( compilation_database_mutex_ );
 

@@ -1,5 +1,6 @@
-# Copyright (C) 2017 ycmd contributors
 # encoding: utf-8
+#
+# Copyright (C) 2017-2018 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -28,7 +29,8 @@ from hamcrest import ( assert_that,
                        contains_inanyorder,
                        empty,
                        matches_regexp,
-                       has_entries )
+                       has_entries,
+                       has_item )
 from nose.tools import eq_
 
 from pprint import pformat
@@ -36,22 +38,13 @@ import requests
 
 from ycmd import handlers
 from ycmd.tests.java import DEFAULT_PROJECT_DIR, PathToTestFile, SharedYcmd
-from ycmd.tests.test_utils import ( BuildRequest,
+from ycmd.tests.test_utils import ( CombineRequest,
                                     ChunkMatcher,
                                     CompletionEntryMatcher,
-                                    LocationMatcher )
+                                    LocationMatcher,
+                                    WithRetry )
 from ycmd.utils import ReadFile
 from mock import patch
-
-
-def _CombineRequest( request, data ):
-  return BuildRequest( **_Merge( request, data ) )
-
-
-def _Merge( request, data ):
-  kw = dict( request )
-  kw.update( data )
-  return kw
 
 
 def ProjectPath( *args ):
@@ -62,6 +55,7 @@ def ProjectPath( *args ):
                          *args )
 
 
+@WithRetry
 def RunTest( app, test ):
   """
   Method to run a simple completion test and verify the result
@@ -77,17 +71,17 @@ def RunTest( app, test ):
   contents = ReadFile( test[ 'request' ][ 'filepath' ] )
 
   app.post_json( '/event_notification',
-                 _CombineRequest( test[ 'request' ], {
-                                  'event_name': 'FileReadyToParse',
-                                  'contents': contents,
-                                  } ),
+                 CombineRequest( test[ 'request' ], {
+                                   'event_name': 'FileReadyToParse',
+                                   'contents': contents,
+                                 } ),
                  expect_errors = True )
 
   # We ignore errors here and we check the response code ourself.
   # This is to allow testing of requests returning errors.
   response = app.post_json( '/completions',
-                            _CombineRequest( test[ 'request' ], {
-                               'contents': contents
+                            CombineRequest( test[ 'request' ], {
+                              'contents': contents
                             } ),
                             expect_errors = True )
 
@@ -189,6 +183,35 @@ def GetCompletions_WithQuery_test( app ):
 
 
 @SharedYcmd
+def GetCompletions_DetailFromCache_test( app ):
+  for i in range( 0, 2 ):
+    RunTest( app, {
+      'description': 'completion works when the elements come from the cache',
+      'request': {
+        'filetype'  : 'java',
+        'filepath'  : ProjectPath( 'TestLauncher.java' ),
+        'line_num'  : 32,
+        'column_num': 12,
+      },
+      'expect': {
+        'response': requests.codes.ok,
+        'data': has_entries( {
+          'completion_start_column': 11,
+          'completions': has_item(
+            CompletionEntryMatcher( 'doSomethingVaguelyUseful',
+                                    'AbstractTestWidget', {
+                                      'kind': 'Function',
+                                      'menu_text':
+                                        'doSomethingVaguelyUseful() : void',
+                                    } )
+          ),
+          'errors': empty(),
+        } )
+      },
+    } )
+
+
+@SharedYcmd
 def GetCompletions_Package_test( app ):
   RunTest( app, {
     'description': 'completion works for package statements',
@@ -220,7 +243,7 @@ def GetCompletions_Import_Class_test( app ):
     'request': {
       'filetype'  : 'java',
       'filepath'  : ProjectPath( 'TestLauncher.java' ),
-      'line_num'  : 4,
+      'line_num'  : 3,
       'column_num': 34,
     },
     'expect': {
@@ -247,7 +270,7 @@ def GetCompletions_Import_Classes_test( app ):
     'request': {
       'filetype'  : 'java',
       'filepath'  : filepath,
-      'line_num'  : 3,
+      'line_num'  : 4,
       'column_num': 52,
     },
     'expect': {
@@ -423,6 +446,10 @@ def GetCompletions_UnicodeIdentifier_test( app ):
             'kind': 'Field',
             'detailed_info': 'a_test : int\n\n',
           } ),
+          CompletionEntryMatcher( 'åtest', 'Test.TéstClass', {
+            'kind': 'Field',
+            'detailed_info': 'åtest : boolean\n\n',
+          } ),
           CompletionEntryMatcher( 'testywesty', 'Test.TéstClass', {
             'kind': 'Field',
           } ),
@@ -467,6 +494,10 @@ def GetCompletions_ResolveFailed_test( app ):
               'kind': 'Field',
               'detailed_info': 'a_test : int\n\n',
             } ),
+            CompletionEntryMatcher( 'åtest', 'Test.TéstClass', {
+              'kind': 'Field',
+              'detailed_info': 'åtest : boolean\n\n',
+            } ),
             CompletionEntryMatcher( 'testywesty', 'Test.TéstClass', {
               'kind': 'Field',
             } ),
@@ -506,3 +537,186 @@ def Subcommands_ServerNotReady_test( app ):
         } ),
       }
     } )
+
+
+@SharedYcmd
+def GetCompletions_MoreThan100FilteredResolve_test( app ):
+  RunTest( app, {
+    'description': 'More that 100 match, but filtered set is fewer as this '
+                   'depends on max_num_candidates',
+    'request': {
+      'filetype'  : 'java',
+      'filepath'  : ProjectPath( 'TestLauncher.java' ),
+      'line_num'  : 4,
+      'column_num': 15,
+    },
+    'expect': {
+      'response': requests.codes.ok,
+      'data': has_entries( {
+        'completions': has_item(
+          CompletionEntryMatcher( 'com.youcompleteme.*;', None, {
+            'kind': 'Module',
+            'detailed_info': 'com.youcompleteme\n\n',
+          } ),
+        ),
+        'completion_start_column': 8,
+        'errors': empty(),
+      } )
+    },
+  } )
+
+
+@SharedYcmd
+def GetCompletions_MoreThan100ForceSemantic_test( app ):
+  RunTest( app, {
+    'description': 'When forcing we pass the query, which reduces candidates',
+    'request': {
+      'filetype'  : 'java',
+      'filepath'  : ProjectPath( 'TestLauncher.java' ),
+      'line_num'  : 4,
+      'column_num': 15,
+      'force_semantic': True
+    },
+    'expect': {
+      'response': requests.codes.ok,
+      'data': has_entries( {
+        'completions': contains(
+          CompletionEntryMatcher( 'com.youcompleteme.*;', None, {
+            'kind': 'Module',
+            'detailed_info': 'com.youcompleteme\n\n',
+          } ),
+          CompletionEntryMatcher( 'com.youcompleteme.testing.*;', None, {
+            'kind': 'Module',
+            'detailed_info': 'com.youcompleteme.testing\n\n',
+          } ),
+        ),
+        'completion_start_column': 8,
+        'errors': empty(),
+      } )
+    },
+  } )
+
+
+@SharedYcmd
+def GetCompletions_ForceAtTopLevel_NoImport_test( app ):
+  RunTest( app, {
+    'description': 'When forcing semantic completion, pass the query to server',
+    'request': {
+      'filetype'  : 'java',
+      'filepath'  : ProjectPath( 'TestWidgetImpl.java' ),
+      'line_num'  : 30,
+      'column_num': 20,
+      'force_semantic': True,
+    },
+    'expect': {
+      'response': requests.codes.ok,
+      'data': has_entries( {
+        'completions': contains(
+          CompletionEntryMatcher( 'TestFactory', None, {
+            'kind': 'Class',
+            'menu_text': 'TestFactory - com.test',
+          } ),
+        ),
+        'completion_start_column': 12,
+        'errors': empty(),
+      } )
+    },
+  } )
+
+
+@SharedYcmd
+def GetCompletions_NoForceAtTopLevel_NoImport_test( app ):
+  RunTest( app, {
+    'description': 'When not forcing semantic completion, use no context',
+    'request': {
+      'filetype'  : 'java',
+      'filepath'  : ProjectPath( 'TestWidgetImpl.java' ),
+      'line_num'  : 30,
+      'column_num': 20,
+      'force_semantic': False,
+    },
+    'expect': {
+      'response': requests.codes.ok,
+      'data': has_entries( {
+        'completions': contains(
+          CompletionEntryMatcher( 'TestFactory', '[ID]', {} ),
+        ),
+        'completion_start_column': 12,
+        'errors': empty(),
+      } )
+    },
+  } )
+
+
+@SharedYcmd
+def GetCompletions_ForceAtTopLevel_WithImport_test( app ):
+  filepath = ProjectPath( 'TestWidgetImpl.java' )
+  RunTest( app, {
+    'description': 'Top level completions have import FixIts',
+    'request': {
+      'filetype'  : 'java',
+      'filepath'  : filepath,
+      'line_num'  : 34,
+      'column_num': 15,
+      'force_semantic': True,
+    },
+    'expect': {
+      'response': requests.codes.ok,
+      'data': has_entries( {
+        'completions': has_item(
+          CompletionEntryMatcher( 'InputStreamReader', None, {
+            'kind': 'Class',
+            'menu_text': 'InputStreamReader - java.io',
+            'extra_data': has_entries( {
+              'fixits': contains( has_entries( {
+                'chunks': contains(
+                  ChunkMatcher( '\n\n',
+                                LocationMatcher( filepath, 1, 18 ),
+                                LocationMatcher( filepath, 1, 18 ) ),
+                  ChunkMatcher( 'import java.io.InputStreamReader;',
+                                LocationMatcher( filepath, 1, 18 ),
+                                LocationMatcher( filepath, 1, 18 ) ),
+                  ChunkMatcher( '\n\n',
+                                LocationMatcher( filepath, 1, 18 ),
+                                LocationMatcher( filepath, 1, 18 ) ),
+                  ChunkMatcher( '',
+                                LocationMatcher( filepath, 1, 18 ),
+                                LocationMatcher( filepath, 3, 1 ) ),
+                ),
+              } ) ),
+            } ),
+          } ),
+        ),
+        'completion_start_column': 12,
+        'errors': empty(),
+      } )
+    },
+  } )
+
+
+@SharedYcmd
+def GetCompletions_UseServerTriggers_test( app ):
+  filepath = ProjectPath( 'TestWidgetImpl.java' )
+
+  RunTest( app, {
+    'description': 'We use the semantic triggers from the server (@ here)',
+    'request': {
+      'filetype'  : 'java',
+      'filepath'  : filepath,
+      'line_num'  : 24,
+      'column_num': 7,
+      'force_semantic': False,
+    },
+    'expect': {
+      'response': requests.codes.ok,
+      'data': has_entries( {
+        'completion_start_column': 4,
+        'completions': has_item(
+          CompletionEntryMatcher( 'Override', None, {
+            'kind': 'Class',
+            'menu_text': 'Override - java.lang',
+          } )
+        )
+      } )
+    }
+  } )

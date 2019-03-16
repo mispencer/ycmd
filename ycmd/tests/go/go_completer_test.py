@@ -127,7 +127,8 @@ def ComputeCandidatesInner_AfterUnicode_test( completer, execute_command ):
         return_value = ReadFile( PATH_TO_POS292_RES ) )
 def ComputeCandidatesInner_test( completer, execute_command ):
   # Col 40 corresponds to cursor at ..., log.Prefi^x ...
-  result = completer.ComputeCandidatesInner( BuildRequest( 10, 40 ) )
+  candidates = completer.ComputeCandidatesInner( BuildRequest( 10, 40 ) )
+  result = completer.DetailCandidates( {}, candidates )
   execute_command.assert_called_once_with(
     [ DUMMY_BINARY, '-sock', 'tcp', '-addr', completer._gocode_host,
       '-f=json', 'autocomplete', PATH_TO_TEST_FILE, '287' ],
@@ -167,7 +168,17 @@ def ComputeCandidatesInner_ParseFailure_test( completer, *args ):
 @SetUpGoCompleter
 @patch( 'ycmd.completers.go.go_completer.GoCompleter._ExecuteCommand',
         return_value = '[]' )
-def ComputeCandidatesInner_NoResultsFailure_test( completer, *args ):
+def ComputeCandidatesInner_NoResultsFailure_EmptyList_test( completer, *args ):
+  assert_that(
+    calling( completer.ComputeCandidatesInner ).with_args(
+      BuildRequest( 1, 1 ) ),
+    raises( RuntimeError, 'No completions found.' ) )
+
+
+@SetUpGoCompleter
+@patch( 'ycmd.completers.go.go_completer.GoCompleter._ExecuteCommand',
+        return_value = 'null\n' )
+def ComputeCandidatesInner_NoResultsFailure_Null_test( completer, *args ):
   assert_that(
     calling( completer.ComputeCandidatesInner ).with_args(
       BuildRequest( 1, 1 ) ),

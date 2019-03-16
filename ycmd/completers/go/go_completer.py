@@ -1,5 +1,4 @@
-# Copyright (C) 2015 Google Inc.
-#               2017 ycmd contributors
+# Copyright (C) 2015-2018 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -31,12 +30,9 @@ import threading
 
 from ycmd import responses
 from ycmd import utils
-from ycmd.utils import ToBytes, ToUnicode, ExecutableName
+from ycmd.utils import LOGGER, ToBytes, ToUnicode, ExecutableName
 from ycmd.completers.completer import Completer
 
-BINARY_NOT_FOUND_MESSAGE = ( '{0} binary not found. Did you build it? '
-                             'You can do so by running '
-                             '"./install.py --go-completer".' )
 SHELL_ERROR_MESSAGE = ( 'Command {command} failed with code {code} and error '
                         '"{error}".' )
 COMPUTE_OFFSET_ERROR_MESSAGE = ( 'Go completer could not compute byte offset '
@@ -48,20 +44,17 @@ GOCODE_NO_COMPLETIONS_MESSAGE = 'No completions found.'
 GOCODE_PANIC_MESSAGE = ( 'Gocode panicked trying to find completions, '
                          'you likely have a syntax error.' )
 
-DIR_OF_THIRD_PARTY = os.path.abspath(
-  os.path.join( os.path.dirname( __file__ ), '..', '..', '..', 'third_party' ) )
+GO_DIR = os.path.abspath(
+  os.path.join( os.path.dirname( __file__ ), '..', '..', '..', 'third_party',
+                'go', 'src', 'github.com' ) )
 GO_BINARIES = dict( {
-  'gocode': os.path.join( DIR_OF_THIRD_PARTY,
-                          'gocode',
+  'gocode': os.path.join( GO_DIR, 'mdempsky', 'gocode',
                           ExecutableName( 'gocode' ) ),
-  'godef': os.path.join( DIR_OF_THIRD_PARTY,
-                         'godef',
+  'godef': os.path.join( GO_DIR, 'rogpeppe', 'godef',
                          ExecutableName( 'godef' ) )
 } )
 
 LOGFILE_FORMAT = 'gocode_{port}_{std}_'
-
-_logger = logging.getLogger( __name__ )
 
 
 def FindBinary( binary, user_options ):
@@ -93,7 +86,7 @@ def ShouldEnableGoCompleter( user_options ):
   def _HasBinary( binary ):
     binary_path = FindBinary( binary, user_options )
     if not binary_path:
-      _logger.error( BINARY_NOT_FOUND_MESSAGE.format( binary ) )
+      LOGGER.error( '%s binary not found', binary_path )
     return binary_path
 
   return all( _HasBinary( binary ) for binary in [ 'gocode', 'godef' ] )
@@ -128,7 +121,7 @@ class GoCompleter( Completer ):
 
   def ComputeCandidatesInner( self, request_data ):
     filename = request_data[ 'filepath' ]
-    _logger.info( 'Gocode completion request {0}'.format( filename ) )
+    LOGGER.info( 'Gocode completion request %s', filename )
 
     contents = utils.ToBytes(
         request_data[ 'file_data' ][ filename ][ 'contents' ] )
@@ -149,17 +142,19 @@ class GoCompleter( Completer ):
     try:
       resultdata = json.loads( ToUnicode( stdoutdata ) )
     except ValueError:
-      _logger.error( GOCODE_PARSE_ERROR_MESSAGE )
+      LOGGER.error( GOCODE_PARSE_ERROR_MESSAGE )
       raise RuntimeError( GOCODE_PARSE_ERROR_MESSAGE )
 
-    if len( resultdata ) != 2:
-      _logger.error( GOCODE_NO_COMPLETIONS_MESSAGE )
+    if not isinstance( resultdata, list ) or len( resultdata ) != 2:
+      LOGGER.error( GOCODE_NO_COMPLETIONS_MESSAGE )
       raise RuntimeError( GOCODE_NO_COMPLETIONS_MESSAGE )
     for result in resultdata[ 1 ]:
       if result.get( 'class' ) == 'PANIC':
         raise RuntimeError( GOCODE_PANIC_MESSAGE )
 
-    return [ _ConvertCompletionData( x ) for x in resultdata[ 1 ] ]
+    return [ responses.BuildCompletionData(
+      insertion_text = x[ 'name' ],
+      extra_data = x ) for x in resultdata[ 1 ] ]
 
 
   def GetSubcommandsMap( self ):
@@ -195,7 +190,7 @@ class GoCompleter( Completer ):
           command = ' '.join( command ),
           code = phandle.returncode,
           error = ToUnicode( stderrdata.strip() ) )
-      _logger.error( message )
+      LOGGER.error( message )
       raise RuntimeError( message )
 
     return stdoutdata
@@ -204,7 +199,7 @@ class GoCompleter( Completer ):
   def _StartServer( self ):
     """Start the Gocode server."""
     with self._gocode_lock:
-      _logger.info( 'Starting Gocode server' )
+      LOGGER.info( 'Starting Gocode server' )
 
       self._gocode_port = utils.GetUnusedLocalhostPort()
       self._gocode_host = '127.0.0.1:{0}'.format( self._gocode_port )
@@ -214,7 +209,7 @@ class GoCompleter( Completer ):
                   '-sock', 'tcp',
                   '-addr', self._gocode_host ]
 
-      if _logger.isEnabledFor( logging.DEBUG ):
+      if LOGGER.isEnabledFor( logging.DEBUG ):
         command.append( '-debug' )
 
       self._gocode_stdout = utils.CreateLogfile(
@@ -233,17 +228,17 @@ class GoCompleter( Completer ):
     """Stop the Gocode server."""
     with self._gocode_lock:
       if self._ServerIsRunning():
-        _logger.info( 'Stopping Gocode server with PID {0}'.format(
-                          self._gocode_handle.pid ) )
+        LOGGER.info( 'Stopping Gocode server with PID %s',
+                     self._gocode_handle.pid )
         try:
           self._ExecuteCommand( [ self._gocode_binary_path,
                                   '-sock', 'tcp',
                                   '-addr', self._gocode_host,
                                   'close' ] )
           utils.WaitUntilProcessIsTerminated( self._gocode_handle, timeout = 5 )
-          _logger.info( 'Gocode server stopped' )
+          LOGGER.info( 'Gocode server stopped' )
         except Exception:
-          _logger.exception( 'Error while stopping Gocode server' )
+          LOGGER.exception( 'Error while stopping Gocode server' )
 
       self._CleanUp()
 
@@ -270,7 +265,7 @@ class GoCompleter( Completer ):
 
   def _GoToDefinition( self, request_data ):
     filename = request_data[ 'filepath' ]
-    _logger.info( 'Godef GoTo request {0}'.format( filename ) )
+    LOGGER.info( 'Godef GoTo request %s', filename )
 
     contents = utils.ToBytes(
       request_data[ 'file_data' ][ filename ][ 'contents' ] )
@@ -280,14 +275,14 @@ class GoCompleter( Completer ):
     try:
       stdout = self._ExecuteCommand( [ self._godef_binary_path,
                                        '-i',
-                                       '-f={0}'.format( filename ),
+                                       '-f={}'.format( filename ),
                                        '-json',
-                                       '-o={0}'.format( offset ) ],
+                                       '-o={}'.format( offset ) ],
                                      contents = contents )
     # We catch this exception type and not a more specific one because we
     # raise it in _ExecuteCommand when the command fails.
-    except RuntimeError as error:
-      _logger.exception( error )
+    except RuntimeError:
+      LOGGER.exception( 'Failed to jump to definition' )
       raise RuntimeError( 'Can\'t find a definition.' )
 
     return self._ConstructGoToFromResponse( stdout )
@@ -312,26 +307,8 @@ class GoCompleter( Completer ):
 
 
   def ServerIsHealthy( self ):
-    """Check if the Gocode server is healthy (up and serving)."""
-    if not self._ServerIsRunning():
-      return False
-
-    try:
-      self._ExecuteCommand( [ self._gocode_binary_path,
-                              '-sock', 'tcp',
-                              '-addr', self._gocode_host,
-                              'status' ] )
-      return True
-    # We catch this exception type and not a more specific one because we
-    # raise it in _ExecuteCommand when the command fails.
-    except RuntimeError as error:
-      _logger.exception( error )
-      return False
-
-
-  def ServerIsReady( self ):
-    """Check if the Gocode server is ready. Same as the healthy status."""
-    return self.ServerIsHealthy()
+    """Assume the Gocode server is healthy if it's running."""
+    return self._ServerIsRunning()
 
 
   def DebugInfo( self, request_data ):
@@ -352,6 +329,23 @@ class GoCompleter( Completer ):
                                                items = [ godef_item ] )
 
 
+  def DetailCandidates( self, request_data, candidates ):
+    for candidate in candidates:
+      if 'kind' in candidate:
+        # This candidate is already detailed
+        continue
+      completion = candidate[ 'extra_data' ]
+      candidate[ 'menu_text' ] = completion[ 'name' ]
+      candidate[ 'extra_menu_info' ] = completion[ 'type' ]
+      candidate[ 'kind' ] = completion[ 'class' ]
+      candidate[ 'detailed_info' ] = ' '.join( [
+        completion[ 'name' ],
+        completion[ 'type' ],
+        completion[ 'class' ] ] )
+      candidate.pop( 'extra_data' )
+    return candidates
+
+
 def _ComputeOffset( contents, line, column ):
   """Compute the byte offset in the file given the line and column."""
   contents = ToBytes( contents )
@@ -367,17 +361,5 @@ def _ComputeOffset( contents, line, column ):
       current_column = 1
   message = COMPUTE_OFFSET_ERROR_MESSAGE.format( line = line,
                                                  column = column )
-  _logger.error( message )
+  LOGGER.error( message )
   raise RuntimeError( message )
-
-
-def _ConvertCompletionData( completion_data ):
-  return responses.BuildCompletionData(
-    insertion_text = completion_data[ 'name' ],
-    menu_text = completion_data[ 'name' ],
-    extra_menu_info = completion_data[ 'type' ],
-    kind = completion_data[ 'class' ],
-    detailed_info = ' '.join( [
-        completion_data[ 'name' ],
-        completion_data[ 'type' ],
-        completion_data[ 'class' ] ] ) )

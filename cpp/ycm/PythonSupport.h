@@ -1,4 +1,4 @@
-// Copyright (C) 2011, 2012, 2013 Google Inc.
+// Copyright (C) 2011-2018 ycmd contributors
 //
 // This file is part of ycmd.
 //
@@ -18,7 +18,7 @@
 #ifndef PYTHONSUPPORT_H_KWGFEX0V
 #define PYTHONSUPPORT_H_KWGFEX0V
 
-#include <boost/python.hpp>
+#include <pybind11/pybind11.h>
 
 namespace YouCompleteMe {
 
@@ -28,8 +28,8 @@ namespace YouCompleteMe {
 /// original objects that survived the filtering. This list contains at most
 /// |max_candidates|. If |max_candidates| is omitted or 0, all candidates are
 /// sorted.
-YCM_EXPORT boost::python::list FilterAndSortCandidates(
-  const boost::python::list &candidates,
+YCM_EXPORT pybind11::list FilterAndSortCandidates(
+  const pybind11::list &candidates,
   const std::string &candidate_property,
   const std::string &query,
   const size_t max_candidates = 0 );
@@ -37,7 +37,7 @@ YCM_EXPORT boost::python::list FilterAndSortCandidates(
 /// Given a Python object that's supposed to be "string-like", returns a UTF-8
 /// encoded std::string. Raises an exception if the object can't be converted to
 /// a string. Supports newstr and newbytes from python-future on Python 2.
-std::string GetUtf8String( const boost::python::object &value );
+std::string GetUtf8String( const pybind11::object &value );
 
 } // namespace YouCompleteMe
 

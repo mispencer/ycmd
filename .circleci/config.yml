@@ -22,19 +22,21 @@ aliases:
   # Increase the version key to clear the cache.
   save-cache: &save-cache
     save_cache:
-      key: v3-ycmd-{{ .Environment.CIRCLE_JOB }}
+      key: v6-ycmd-{{ .Environment.CIRCLE_JOB }}
       paths:
         - ~/Library/Caches/Homebrew
-        - ~/.cache/pip
+        - ~/Library/Caches/pip
         - ~/.npm
         - ~/.cargo
         - ~/.pyenv
+        - ~/mono
         - clang_archives
         - third_party/racerd/target
         - third_party/eclipse.jdt.ls/target/cache
+        - third_party/clangd/cache
   restore-cache: &restore-cache
     restore_cache:
-      key: v3-ycmd-{{ .Environment.CIRCLE_JOB }}
+      key: v6-ycmd-{{ .Environment.CIRCLE_JOB }}
 jobs:
   python2:
     <<: *common
@@ -59,7 +61,7 @@ jobs:
       - *save-cache
       - *upload-coverage
     environment:
-      YCMD_PYTHON_VERSION: 3.3
+      YCMD_PYTHON_VERSION: 3.4
   benchmark:
     <<: *common
     steps:
@@ -72,7 +74,7 @@ jobs:
           command: ./benchmark.py
       - *save-cache
     environment:
-      YCMD_PYTHON_VERSION: 3.3
+      YCMD_PYTHON_VERSION: 3.4
 workflows:
   version: 2
   build:

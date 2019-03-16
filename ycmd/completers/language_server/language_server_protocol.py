@@ -1,4 +1,4 @@
-# Copyright (C) 2017 ycmd contributors
+# Copyright (C) 2017-2018 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -22,15 +22,49 @@ from __future__ import absolute_import
 # Not installing aliases from python-future; it's unreliable and slow.
 from builtins import *  # noqa
 
+import collections
 import os
 import json
 import hashlib
 
-from ycmd.utils import ( pathname2url,
+from ycmd.utils import ( ByteOffsetToCodepointOffset,
+                         pathname2url,
                          ToBytes,
                          ToUnicode,
+                         unquote,
                          url2pathname,
+                         urlparse,
                          urljoin )
+
+
+Error = collections.namedtuple( 'RequestError', [ 'code', 'reason' ] )
+
+
+class Errors( object ):
+  # From
+  # https://microsoft.github.io/language-server-protocol/specification#response-message
+  #
+  # JSON RPC
+  ParseError = Error( -32700, "Parse error" )
+  InvalidRequest = Error( -32600, "Invalid request" )
+  MethodNotFound = Error( -32601, "Method not found" )
+  InvalidParams = Error( -32602, "Invalid parameters" )
+  InternalError = Error( -32603, "Internal error" )
+
+  # The following sentinel values represent the range of errors for "user
+  # defined" server errors. We don't define them as actual errors, as they are
+  # just representing a valid range.
+  #
+  # export const serverErrorStart: number = -32099;
+  # export const serverErrorEnd: number = -32000;
+
+  # LSP defines the following custom server errors
+  ServerNotInitialized = Error( -32002, "Server not initialized" )
+  UnknownErrorCode = Error( -32001, "Unknown error code" )
+
+  # LSP request errors
+  RequestCancelled = Error( -32800, "The request was canceled" )
+  ContentModified = Error( -32801, "Content was modified" )
 
 
 INSERT_TEXT_FORMAT = [
@@ -59,6 +93,13 @@ ITEM_KIND = [
   'Color',
   'File',
   'Reference',
+  'Folder',
+  'EnumMember',
+  'Constant',
+  'Struct',
+  'Event',
+  'Operator',
+  'TypeParameter',
 ]
 
 SEVERITY = [
@@ -104,6 +145,7 @@ class ServerFileState( object ):
     self.version = 0
     self.state = ServerFileState.CLOSED
     self.checksum = None
+    self.contents = ''
 
 
   def GetDirtyFileAction( self, contents ):
@@ -120,7 +162,7 @@ class ServerFileState( object ):
     else:
       action = ServerFileState.CHANGE_FILE
 
-    return self._SendNewVersion( new_checksum, action )
+    return self._SendNewVersion( new_checksum, action, contents )
 
 
   def GetSavedFileAction( self, contents ):
@@ -135,7 +177,9 @@ class ServerFileState( object ):
     if self.checksum.digest() == new_checksum.digest():
       return ServerFileState.NO_ACTION
 
-    return self._SendNewVersion( new_checksum, ServerFileState.CHANGE_FILE )
+    return self._SendNewVersion( new_checksum,
+                                 ServerFileState.CHANGE_FILE,
+                                 contents )
 
 
   def GetFileCloseAction( self ):
@@ -149,10 +193,11 @@ class ServerFileState( object ):
     return ServerFileState.NO_ACTION
 
 
-  def _SendNewVersion( self, new_checksum, action ):
+  def _SendNewVersion( self, new_checksum, action, contents ):
     self.checksum = new_checksum
     self.version = self.version + 1
     self.state = ServerFileState.OPEN
+    self.contents = contents
 
     return action
 
@@ -180,19 +225,34 @@ def BuildNotification( method, parameters ):
   } )
 
 
-def Initialize( request_id, project_directory ):
+def BuildResponse( request, parameters ):
+  """Builds a JSON RPC response message to respond to the supplied |request|
+  message. |parameters| should contain either 'error' or 'result'"""
+  message = {
+    'id': request[ 'id' ],
+    'method': request[ 'method' ],
+  }
+  message.update( parameters )
+  return _BuildMessageData( message )
+
+
+def Initialize( request_id, project_directory, settings ):
   """Build the Language Server initialize request"""
 
   return BuildRequest( request_id, 'initialize', {
     'processId': os.getpid(),
     'rootPath': project_directory,
     'rootUri': FilePathToUri( project_directory ),
-    'initializationOptions': {
-      # We don't currently support any server-specific options.
-    },
+    'initializationOptions': settings,
     'capabilities': {
-      # We don't currently support any of the client capabilities, so we don't
-      # include anything in here.
+      'textDocument': {
+        'completion': {
+          'completionItemKind': {
+            # ITEM_KIND list is 1-based.
+            'valueSet': list( range( 1, len( ITEM_KIND ) + 1 ) ),
+          }
+        }
+      }
     },
   } )
 
@@ -207,6 +267,19 @@ def Shutdown( request_id ):
 
 def Exit():
   return BuildNotification( 'exit', None )
+
+
+def Reject( request, request_error, data = None ):
+  msg = {
+    'error': {
+      'code': request_error.code,
+      'reason': request_error.reason,
+    }
+  }
+  if data is not None:
+    msg[ 'error' ][ 'data' ] = data
+
+  return BuildResponse( request, msg )
 
 
 def DidChangeConfiguration( config ):
@@ -247,15 +320,14 @@ def DidCloseTextDocument( file_state ):
   } )
 
 
-def Completion( request_id, request_data ):
+def Completion( request_id, request_data, codepoint ):
   return BuildRequest( request_id, 'textDocument/completion', {
     'textDocument': {
       'uri': FilePathToUri( request_data[ 'filepath' ] ),
     },
-    'position': {
-      'line': request_data[ 'line_num' ] - 1,
-      'character': request_data[ 'start_codepoint' ] - 1,
-    }
+    'position': Position( request_data[ 'line_num' ],
+                          request_data[ 'line_value' ],
+                          codepoint ),
   } )
 
 
@@ -293,7 +365,9 @@ def Rename( request_id, request_data, new_name ):
       'uri': FilePathToUri( request_data[ 'filepath' ] ),
     },
     'newName': new_name,
-    'position': Position( request_data ),
+    'position': Position( request_data[ 'line_num' ],
+                          request_data[ 'line_value' ],
+                          request_data[ 'column_codepoint' ] )
   } )
 
 
@@ -302,7 +376,9 @@ def BuildTextDocumentPositionParams( request_data ):
     'textDocument': {
       'uri': FilePathToUri( request_data[ 'filepath' ] ),
     },
-    'position': Position( request_data ),
+    'position': Position( request_data[ 'line_num' ],
+                          request_data[ 'line_value' ],
+                          request_data[ 'column_codepoint' ] )
   }
 
 
@@ -312,12 +388,74 @@ def References( request_id, request_data ):
   return BuildRequest( request_id, 'textDocument/references', request )
 
 
-def Position( request_data ):
-  # The API requires 0-based Unicode offsets.
+def Position( line_num, line_value, column_codepoint ):
+  # The API requires 0-based line number and 0-based UTF-16 offset.
   return {
-    'line': request_data[ 'line_num' ] - 1,
-    'character': request_data[ 'column_codepoint' ] - 1,
+    'line': line_num - 1,
+    'character': CodepointsToUTF16CodeUnits( line_value, column_codepoint ) - 1
   }
+
+
+def Formatting( request_id, request_data ):
+  return BuildRequest( request_id, 'textDocument/formatting', {
+    'textDocument': {
+      'uri': FilePathToUri( request_data[ 'filepath' ] ),
+    },
+    'options': FormattingOptions( request_data )
+  } )
+
+
+def RangeFormatting( request_id, request_data ):
+  return BuildRequest( request_id, 'textDocument/rangeFormatting', {
+    'textDocument': {
+      'uri': FilePathToUri( request_data[ 'filepath' ] ),
+    },
+    'range': Range( request_data ),
+    'options': FormattingOptions( request_data )
+  } )
+
+
+def FormattingOptions( request_data ):
+  options = request_data[ 'options' ]
+  return {
+    'tabSize': options[ 'tab_size' ],
+    'insertSpaces': options[ 'insert_spaces' ]
+  }
+
+
+def Range( request_data ):
+  lines = request_data[ 'lines' ]
+
+  start = request_data[ 'range' ][ 'start' ]
+  start_line_num = start[ 'line_num' ]
+  start_line_value = lines[ start_line_num - 1 ]
+  start_codepoint = ByteOffsetToCodepointOffset( start_line_value,
+                                                 start[ 'column_num' ] )
+
+  end = request_data[ 'range' ][ 'end' ]
+  end_line_num = end[ 'line_num' ]
+  end_line_value = lines[ end_line_num - 1 ]
+  end_codepoint = ByteOffsetToCodepointOffset( end_line_value,
+                                               end[ 'column_num' ] )
+
+  # LSP requires to use the start of the next line as the end position for a
+  # range that ends with a newline.
+  if end_codepoint >= len( end_line_value ):
+    end_line_num += 1
+    end_line_value = ''
+    end_codepoint = 1
+
+  return {
+    'start': Position( start_line_num, start_line_value, start_codepoint ),
+    'end': Position( end_line_num, end_line_value, end_codepoint )
+  }
+
+
+def ExecuteCommand( request_id, command, arguments ):
+  return BuildRequest( request_id, 'workspace/executeCommand', {
+    'command': command,
+    'arguments': arguments
+  } )
 
 
 def FilePathToUri( file_name ):
@@ -325,10 +463,18 @@ def FilePathToUri( file_name ):
 
 
 def UriToFilePath( uri ):
-  if uri [ : 5 ] != "file:":
+  parsed_uri = urlparse( uri )
+  if parsed_uri.scheme != 'file':
     raise InvalidUriException( uri )
 
-  return os.path.abspath( url2pathname( uri[ 5 : ] ) )
+  # url2pathname doesn't work as expected when uri.path is percent-encoded and
+  # is a windows path for ex:
+  # url2pathname('/C%3a/') == 'C:\\C:'
+  # whereas
+  # url2pathname('/C:/') == 'C:\\'
+  # Therefore first unquote pathname.
+  pathname = unquote( parsed_uri.path )
+  return os.path.abspath( url2pathname( pathname ) )
 
 
 def _BuildMessageData( message ):
@@ -338,7 +484,7 @@ def _BuildMessageData( message ):
   # JSON/YAML parser.
   data = ToBytes( json.dumps( message, sort_keys=True ) )
   packet = ToBytes( 'Content-Length: {0}\r\n'
-                    '\r\n'.format( len(data) ) ) + data
+                    '\r\n'.format( len( data ) ) ) + data
   return packet
 
 
@@ -348,8 +494,9 @@ def Parse( data ):
 
 
 def CodepointsToUTF16CodeUnits( line_value, codepoint_offset ):
-  """Return the 1-based UTF16 code unit offset equivalent to the 1-based unicode
-  icodepoint offset |codepoint_offset| in the the Unicode string |line_value|"""
+  """Return the 1-based UTF-16 code unit offset equivalent to the 1-based
+  unicode codepoint offset |codepoint_offset| in the Unicode string
+  |line_value|"""
   # Language server protocol requires offsets to be in utf16 code _units_.
   # Each code unit is 2 bytes.
   # So we re-encode the line as utf-16 and divide the length in bytes by 2.
@@ -367,8 +514,8 @@ def CodepointsToUTF16CodeUnits( line_value, codepoint_offset ):
 
 def UTF16CodeUnitsToCodepoints( line_value, code_unit_offset ):
   """Return the 1-based codepoint offset into the unicode string |line_value|
-  equivalent to the 1-based UTF16 code unit offset |code_unit_offset| into a
-  utf16 encoded version of |line_value|"""
+  equivalent to the 1-based UTF-16 code unit offset |code_unit_offset| into a
+  UTF-16 encoded version of |line_value|"""
   # As above, LSP returns offsets in utf16 code units. So we convert the line to
   # UTF16, snip everything up to the code_unit_offset * 2 bytes (each code unit
   # is 2 bytes), then re-encode as unicode and return the length (in

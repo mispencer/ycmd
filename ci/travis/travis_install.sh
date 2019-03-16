@@ -27,6 +27,9 @@ else
   ln -s /usr/bin/gcc-4.9 ${HOME}/bin/cc
 fi
 ln -s /usr/bin/gcov-4.9 ${HOME}/bin/gcov
+if [ -n "${YCM_CLANG_TIDY}" ]; then
+  ln -s /usr/bin/clang-tidy-3.9 ${HOME}/bin/clang-tidy
+fi
 
 export PATH=${HOME}/bin:${PATH}
 
@@ -42,21 +45,20 @@ if [ ! -d "${PYENV_ROOT}/.git" ]; then
 fi
 pushd ${PYENV_ROOT}
 git fetch --tags
-git checkout v1.0.8
+git checkout v1.2.1
 popd
 
 export PATH="${PYENV_ROOT}/bin:${PATH}"
 
 eval "$(pyenv init -)"
 
-if [ "${YCMD_PYTHON_VERSION}" == "2.6" ]; then
-  PYENV_VERSION="2.6.6"
-elif [ "${YCMD_PYTHON_VERSION}" == "2.7" ]; then
-  # We need a recent enough version of Python 2.7 on OS X or an error occurs
-  # when installing the psutil dependency for our tests.
-  PYENV_VERSION="2.7.8"
+if [ "${YCMD_PYTHON_VERSION}" == "2.7" ]; then
+  # Tests are failing on Python 2.7.0 with the exception "TypeError: argument
+  # can't be <type 'unicode'>" and importing the coverage module fails on Python
+  # 2.7.1.
+  PYENV_VERSION="2.7.2"
 else
-  PYENV_VERSION="3.3.6"
+  PYENV_VERSION="3.4.0"
 fi
 
 # In order to work with ycmd, python *must* be built as a shared library. This
@@ -74,7 +76,6 @@ python_version=$(python -c 'import sys; print( "{0}.{1}".format( sys.version_inf
 echo "Checking python version (actual ${python_version} vs expected ${YCMD_PYTHON_VERSION})"
 test ${python_version} == ${YCMD_PYTHON_VERSION}
 
-pip install -U pip wheel setuptools
 pip install -r test_requirements.txt
 
 # Enable coverage for Python subprocesses. See:
@@ -93,18 +94,12 @@ rustup update
 rustc -Vv
 cargo -V
 
-##################
-# JavaScript setup
-##################
+#################################
+# JavaScript and TypeScript setup
+#################################
 
 # Pre-installed Node.js is too old. Install latest Node.js v4 LTS.
 nvm install 4
-
-##################
-# TypeScript setup
-##################
-
-npm install -g typescript
 
 ###############
 # Java 8 setup

@@ -25,18 +25,17 @@ from builtins import *  # noqa
 from contextlib import contextmanager
 import functools
 import os
-import time
-from inspect import getargspec
 
-from ycmd import handlers
-from ycmd.tests.test_utils import ( ClearCompletionsCache, IsolatedApp,
-                                    SetUpApp, BuildRequest )
-from ycmd.utils import ReadFile
+from ycmd.tests.test_utils import ( ClearCompletionsCache,
+                                    IgnoreExtraConfOutsideTestsFolder,
+                                    IsolatedApp,
+                                    SetUpApp,
+                                    StartCompleterServer,
+                                    StopCompleterServer,
+                                    WaitUntilCompleterServerReady )
 
-shared_legacy_app = None
-shared_roslyn_app = None
-shared_app_server_state = {}
-shared_app_filepaths = {}
+shared_app = None
+shared_filepaths = []
 
 
 def PathToTestFile( *args ):
@@ -44,116 +43,34 @@ def PathToTestFile( *args ):
   return os.path.join( dir_of_current_script, 'testdata', *args )
 
 
-def StartOmniSharpServer( app, filepath ):
-  contents = ReadFile( filepath )
-  event_data = BuildRequest( filepath = filepath,
-                            event_name = 'FileReadyToParse',
-                            filetype = 'cs',
-                            contents = contents )
-  app.post_json( '/event_notification', event_data ).json
-
-
-def StopOmniSharpServer( app, filepath ):
-  app.post_json( '/run_completer_command',
-                 BuildRequest( completer_target = 'filetype_default',
-                               command_arguments = [ 'StopServer' ],
-                               filepath = filepath,
-                               filetype = 'cs' ) )
-
-
-def WaitUntilOmniSharpServerReady( app, filepath ):
-  # 5 minutes since CI can be slow to startup
-  retries = 5 * 60 / 0.2
-  success = False
-
-  while retries > 0:
-    try:
-      request = BuildRequest( completer_target = 'filetype_default',
-                              command_arguments = [ 'ServerIsReady' ],
-                              filepath = filepath,
-                              filetype = 'cs' )
-      result = app.post_json( '/run_completer_command', request ).json
-      if result:
-        success = True
-        break
-      # if not result:
-      #   raise RuntimeError( "OmniSharp failed during startup." )
-    except Exception:
-      pass
-    time.sleep( 0.2 )
-    retries = retries - 1
-
-  # Omnisharp isn't quite ready when it says it is, so wait a little longer
-  time.sleep( 10 )
-
-  if not success:
-    raise RuntimeError( "Timeout waiting for OmniSharpServer" )
-
-
 def setUpPackage():
   """Initializes the ycmd server as a WebTest application that will be shared
   by all tests using the SharedYcmd decorator in this package. Additional
   configuration that is common to these tests, like starting a semantic
   subserver, should be done here."""
-  global shared_legacy_app, shared_roslyn_app, shared_app_server_state
+  global shared_app
 
-  shared_legacy_app = SetUpApp()
-  shared_app_server_state[ shared_legacy_app ] = handlers._server_state
-  shared_legacy_app.post_json(
-    '/ignore_extra_conf_file',
-    { 'filepath': PathToTestFile( '.ycm_extra_conf.py' ) } )
-  shared_app_filepaths[ shared_legacy_app ] = []
-
-  shared_roslyn_app = SetUpApp()
-  shared_app_server_state[ shared_roslyn_app ] = handlers._server_state
-  shared_roslyn_app.post_json(
-    '/ignore_extra_conf_file',
-    { 'filepath': PathToTestFile( '.ycm_extra_conf.py' ) } )
-  shared_app_filepaths[ shared_roslyn_app ] = []
+  shared_app = SetUpApp()
 
 
 def tearDownPackage():
   """Cleans up the tests using the SharedYcmd decorator in this package. It is
   executed once after running all the tests in the package."""
-  global shared_app_filepaths
+  global shared_app, shared_filepaths
 
-  for app in shared_app_filepaths:
-    old_server_state = handlers._server_state
-    try:
-      handlers._server_state = shared_app_server_state[ app ]
-      for filepath in shared_app_filepaths[ app ]:
-        StopOmniSharpServer( app, filepath )
-    finally:
-      shared_app_server_state[ app ] = handlers._server_state
-      handlers._server_state = old_server_state
+  for filepath in shared_filepaths:
+    StopCompleterServer( shared_app, 'cs', filepath )
 
 
 @contextmanager
-def WrapOmniSharpServer( app, filepath, use_roslyn ):
-  global shared_app_filepaths
-  if ( app not in shared_app_filepaths
-       or filepath not in shared_app_filepaths[ app ] ):
-    if app in shared_app_filepaths:
-      shared_app_filepaths[ app ].append( filepath )
-    SetRoslynState( app, filepath, use_roslyn )
-    StartOmniSharpServer( app, filepath )
-    WaitUntilOmniSharpServerReady( app, filepath )
+def WrapOmniSharpServer( app, filepath ):
+  global shared_filepaths
+
+  if filepath not in shared_filepaths:
+    StartCompleterServer( app, 'cs', filepath )
+    shared_filepaths.append( filepath )
+  WaitUntilCompleterServerReady( app, 'cs' )
   yield
-
-
-def SetRoslynState( app, filepath, use_roslyn ):
-  if use_roslyn:
-    app.post_json( '/run_completer_command',
-                  BuildRequest( completer_target = 'filetype_default',
-                                command_arguments = [ 'UseRoslynOmnisharp' ],
-                                filepath = filepath,
-                                filetype = 'cs' ) )
-  else:
-    app.post_json( '/run_completer_command',
-                  BuildRequest( completer_target = 'filetype_default',
-                                command_arguments = [ 'UseLegacyOmnisharp' ],
-                                filepath = filepath,
-                                filetype = 'cs' ) )
 
 
 def SharedYcmd( test ):
@@ -161,35 +78,17 @@ def SharedYcmd( test ):
   passes the shared ycmd application as a parameter.
 
   Do NOT attach it to test generators but directly to the yielded tests."""
+  global shared_app
 
   @functools.wraps( test )
   def Wrapper( *args, **kwargs ):
-    global shared_legacy_app, shared_roslyn_app, shared_app_server_state
-
-    ( argspec, _, _, _ ) = getargspec( test )
-    try:
-      argindex = argspec.index( 'use_roslyn' )
-      use_roslyn = args[ argindex - 1 ]
-    except Exception:
-      if 'use_roslyn' in kwargs:
-        use_roslyn = kwargs[ 'use_roslyn' ]
-      else:
-        use_roslyn = False
-    app = shared_roslyn_app if use_roslyn else shared_legacy_app
-
-    old_server_state = handlers._server_state
-
-    try:
-      handlers._server_state = shared_app_server_state[ app ]
-      ClearCompletionsCache()
-      return test( app, *args, **kwargs )
-    finally:
-      shared_app_server_state[ app ] = handlers._server_state
-      handlers._server_state = old_server_state
+    ClearCompletionsCache()
+    with IgnoreExtraConfOutsideTestsFolder():
+      return test( shared_app, *args, **kwargs )
   return Wrapper
 
 
-def IsolatedYcmd( test ):
+def IsolatedYcmd( custom_options = {} ):
   """Defines a decorator to be attached to tests of this package. This decorator
   passes a unique ycmd application as a parameter. It should be used on tests
   that change the server state in a irreversible way (ex: a semantic subserver
@@ -207,12 +106,10 @@ def IsolatedYcmd( test ):
     def CustomServerKeepLogfiles_test( app ):
       ...
   """
-
-  @functools.wraps( test )
-  def Wrapper( *args, **kwargs ):
-    with IsolatedApp( {} ) as app:
-      app.post_json(
-        '/ignore_extra_conf_file',
-        { 'filepath': PathToTestFile( '.ycm_extra_conf.py' ) } )
-      test( app, *args, **kwargs )
-  return Wrapper
+  def Decorator( test ):
+    @functools.wraps( test )
+    def Wrapper( *args, **kwargs ):
+      with IsolatedApp( custom_options ) as app:
+        test( app, *args, **kwargs )
+    return Wrapper
+  return Decorator

@@ -1,4 +1,4 @@
-# Copyright (C) 2015-2017 ycmd contributors
+# Copyright (C) 2015-2018 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -31,9 +31,8 @@ import threading
 from subprocess import PIPE
 from ycmd import utils, responses
 from ycmd.completers.completer import Completer
-from ycmd.completers.completer_utils import GetFileContents
-
-_logger = logging.getLogger( __name__ )
+from ycmd.completers.completer_utils import GetFileLines
+from ycmd.utils import LOGGER
 
 PATH_TO_TERN_BINARY = os.path.abspath(
   os.path.join(
@@ -48,8 +47,7 @@ PATH_TO_TERN_BINARY = os.path.abspath(
     'bin',
     'tern' ) )
 
-# On Debian-based distributions, node is by default installed as nodejs.
-PATH_TO_NODE = utils.PathToFirstExistingExecutable( [ 'nodejs', 'node' ] )
+PATH_TO_NODE = utils.FindExecutable( 'node' )
 
 # host name/address on which the tern server should listen
 # note: we use 127.0.0.1 rather than localhost because on some platforms
@@ -67,16 +65,16 @@ def ShouldEnableTernCompleter():
   install or manually ran 'npm install' in the tern submodule directory."""
 
   if not PATH_TO_NODE:
-    _logger.warning( 'Not using Tern completer: unable to find node' )
+    LOGGER.warning( 'Not using Tern completer: unable to find node' )
     return False
 
-  _logger.info( 'Using node binary from: ' + PATH_TO_NODE )
+  LOGGER.info( 'Using node binary from: %s', PATH_TO_NODE )
 
   installed = os.path.exists( PATH_TO_TERN_BINARY )
 
   if not installed:
-    _logger.info( 'Not using Tern completer: not installed at ' +
-                  PATH_TO_TERN_BINARY )
+    LOGGER.info( 'Not using Tern completer: not installed at %s',
+                 PATH_TO_TERN_BINARY )
     return False
 
   return True
@@ -251,9 +249,9 @@ class TernCompleter( Completer ):
       'GoToReferences': ( lambda self, request_data, args:
                                          self._GoToReferences( request_data ) ),
       'GetType':        ( lambda self, request_data, args:
-                                         self._GetType( request_data) ),
+                                         self._GetType( request_data ) ),
       'GetDoc':         ( lambda self, request_data, args:
-                                         self._GetDoc( request_data) ),
+                                         self._GetDoc( request_data ) ),
       'RefactorRename': ( lambda self, request_data, args:
                                          self._Rename( request_data, args ) ),
     }
@@ -286,7 +284,7 @@ class TernCompleter( Completer ):
 
 
   def Shutdown( self ):
-    _logger.debug( "Shutting down Tern server" )
+    LOGGER.debug( 'Shutting down Tern server' )
     self._StopServer()
 
 
@@ -387,15 +385,15 @@ class TernCompleter( Completer ):
     working_dir = request_data.get( 'working_dir',
                                     utils.GetCurrentDirectory() )
     if not self._server_project_file:
-      _logger.warning( 'No .tern-project file detected: %s', filepath )
+      LOGGER.warning( 'No .tern-project file detected: %s', filepath )
       self._server_working_dir = working_dir
     else:
-      _logger.info( 'Detected Tern configuration file at: %s',
-                    self._server_project_file )
+      LOGGER.info( 'Detected Tern configuration file at: %s',
+                   self._server_project_file )
       self._server_working_dir = (
         os.path.dirname( self._server_project_file ) if is_project else
         working_dir )
-    _logger.info( 'Tern paths are relative to: %s', self._server_working_dir )
+    LOGGER.info( 'Tern paths are relative to: %s', self._server_working_dir )
 
 
   def _StartServer( self, request_data ):
@@ -405,7 +403,7 @@ class TernCompleter( Completer ):
 
       self._server_started = True
 
-      _logger.info( 'Starting Tern server...' )
+      LOGGER.info( 'Starting Tern server...' )
 
       self._SetServerProjectFileAndWorkingDirectory( request_data )
 
@@ -420,10 +418,10 @@ class TernCompleter( Completer ):
                   '--persistent',
                   '--no-port-file' ]
 
-      if _logger.isEnabledFor( logging.DEBUG ):
+      if LOGGER.isEnabledFor( logging.DEBUG ):
         command.append( '--verbose' )
 
-      _logger.debug( 'Starting tern with the following command: %s', command )
+      LOGGER.debug( 'Starting tern with the following command: %s', command )
 
       self._server_stdout = utils.CreateLogfile(
           LOGFILE_FORMAT.format( port = self._server_port, std = 'stdout' ) )
@@ -445,14 +443,14 @@ class TernCompleter( Completer ):
             cwd = self._server_working_dir )
 
       if self._ServerIsRunning():
-        _logger.info( 'Tern Server started with pid %d listening on port %d',
-                      self._server_handle.pid, self._server_port )
-        _logger.info( 'Tern Server log files are %s and %s',
-                      self._server_stdout, self._server_stderr )
+        LOGGER.info( 'Tern Server started with pid %d listening on port %d',
+                     self._server_handle.pid, self._server_port )
+        LOGGER.info( 'Tern Server log files are %s and %s',
+                     self._server_stdout, self._server_stderr )
 
         self._do_tern_project_check = True
       else:
-        _logger.warning( 'Tern server did not start successfully' )
+        LOGGER.warning( 'Tern server did not start successfully' )
 
 
   def _RestartServer( self, request_data ):
@@ -464,15 +462,15 @@ class TernCompleter( Completer ):
   def _StopServer( self ):
     with self._server_state_mutex:
       if self._ServerIsRunning():
-        _logger.info( 'Stopping Tern server with PID {0}'.format(
-                          self._server_handle.pid ) )
+        LOGGER.info( 'Stopping Tern server with PID %s',
+                     self._server_handle.pid )
         self._server_handle.terminate()
         try:
           utils.WaitUntilProcessIsTerminated( self._server_handle,
                                               timeout = 5 )
-          _logger.info( 'Tern server stopped' )
+          LOGGER.info( 'Tern server stopped' )
         except RuntimeError:
-          _logger.exception( 'Error while stopping Tern server' )
+          LOGGER.exception( 'Error while stopping Tern server' )
 
       self._CleanUp()
 
@@ -548,7 +546,7 @@ class TernCompleter( Completer ):
     filepath = self._ServerPathToAbsolute( response[ 'file' ] )
     return responses.BuildGoToResponseFromLocation(
       _BuildLocation(
-        utils.SplitLines( GetFileContents( request_data, filepath ) ),
+        GetFileLines( request_data, filepath ),
         filepath,
         response[ 'start' ][ 'line' ],
         response[ 'start' ][ 'ch' ] ) )
@@ -566,8 +564,7 @@ class TernCompleter( Completer ):
     def BuildRefResponse( ref ):
       filepath = self._ServerPathToAbsolute( ref[ 'file' ] )
       return responses.BuildGoToResponseFromLocation(
-        _BuildLocation(
-          utils.SplitLines( GetFileContents( request_data, filepath ) ),
+        _BuildLocation( GetFileLines( request_data, filepath ),
           filepath,
           ref[ 'start' ][ 'line' ],
           ref[ 'start' ][ 'ch' ] ) )
@@ -650,8 +647,7 @@ class TernCompleter( Completer ):
 
     def BuildFixItChunk( change ):
       filepath = self._ServerPathToAbsolute( change[ 'file' ] )
-      file_contents = utils.SplitLines(
-        GetFileContents( request_data, filepath ) )
+      file_contents = GetFileLines( request_data, filepath )
       return responses.FixItChunk(
         change[ 'text' ],
         BuildRange( file_contents,

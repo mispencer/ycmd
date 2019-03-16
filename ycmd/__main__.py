@@ -1,4 +1,4 @@
-# Copyright (C) 2013 Google Inc.
+# Copyright (C) 2013-2019 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -25,7 +25,7 @@ import sys
 import os
 
 sys.path.insert( 0, os.path.dirname( os.path.abspath( __file__ ) ) )
-from server_utils import SetUpPythonPath, CompatibleWithCurrentCore
+from server_utils import SetUpPythonPath
 SetUpPythonPath()
 
 # Not installing aliases from python-future; it's unreliable and slow.
@@ -42,7 +42,10 @@ import base64
 
 from ycmd import extra_conf_store, user_options_store, utils
 from ycmd.hmac_plugin import HmacPlugin
-from ycmd.utils import ToBytes, ReadFile, OpenForStdHandle
+from ycmd.utils import ( ImportAndCheckCore,
+                         OpenForStdHandle,
+                         ReadFile,
+                         ToBytes )
 from ycmd.wsgi_server import StoppableWSGIServer
 
 
@@ -95,15 +98,15 @@ def ParseArguments():
   parser = argparse.ArgumentParser()
   # Not using 'localhost' on purpose; see #987 and #1130
   parser.add_argument( '--host', type = str, default = '127.0.0.1',
-                       help = 'server hostname')
+                       help = 'server hostname' )
   # Default of 0 will make the OS pick a free port for us
   parser.add_argument( '--port', type = int, default = 0,
-                       help = 'server port')
+                       help = 'server port' )
   parser.add_argument( '--log', type = str, default = 'info',
                        help = 'log level, one of '
                               '[debug|info|warning|error|critical]' )
   parser.add_argument( '--idle_suicide_seconds', type = int, default = 0,
-                       help = 'num idle seconds before server shuts down')
+                       help = 'num idle seconds before server shuts down' )
   parser.add_argument( '--check_interval_seconds', type = int, default = 600,
                        help = 'interval in seconds to check server '
                               'inactivity and keep subservers alive' )
@@ -160,7 +163,7 @@ def Main():
   YcmCoreSanityCheck()
   extra_conf_store.CallGlobalExtraConfYcmCorePreloadIfExists()
 
-  code = CompatibleWithCurrentCore()
+  code = ImportAndCheckCore()
   if code:
     sys.exit( code )
 

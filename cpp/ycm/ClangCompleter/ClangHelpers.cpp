@@ -1,4 +1,4 @@
-// Copyright (C) 2013 Google Inc.
+// Copyright (C) 2013-2018 ycmd contributors
 //
 // This file is part of ycmd.
 //
@@ -17,14 +17,13 @@
 
 #include "ClangHelpers.h"
 #include "ClangUtils.h"
-#include "Utils.h"
-#include "UnsavedFile.h"
 #include "Location.h"
-#include "Range.h"
 #include "PythonSupport.h"
+#include "Range.h"
+#include "UnsavedFile.h"
+#include "Utils.h"
 
 #include <unordered_map>
-#include <iostream>
 #include <utility>
 
 using std::unordered_map;
@@ -36,25 +35,25 @@ DiagnosticKind DiagnosticSeverityToType( CXDiagnosticSeverity severity ) {
   switch ( severity ) {
     case CXDiagnostic_Ignored:
     case CXDiagnostic_Note:
-      return INFORMATION;
+      return DiagnosticKind::INFORMATION;
 
     case CXDiagnostic_Warning:
-      return WARNING;
+      return DiagnosticKind::WARNING;
 
     case CXDiagnostic_Error:
     case CXDiagnostic_Fatal:
     default:
-      return ERROR;
+      return DiagnosticKind::ERROR;
   }
 }
 
-FixIt BuildFixIt( const std::string& text,
-                  CXDiagnostic diagnostic ) {
+FixIt BuildDiagnosticFixIt( const std::string& text, CXDiagnostic diagnostic ) {
   FixIt fixit;
 
   size_t num_chunks = clang_getDiagnosticNumFixIts( diagnostic );
-  if ( !num_chunks )
+  if ( !num_chunks ) {
     return fixit;
+  }
 
   fixit.chunks.reserve( num_chunks );
   fixit.location = Location( clang_getDiagnosticLocation( diagnostic ) );
@@ -62,13 +61,13 @@ FixIt BuildFixIt( const std::string& text,
 
   for ( size_t idx = 0; idx < num_chunks; ++idx ) {
     FixItChunk chunk;
-    CXSourceRange sourceRange;
+    CXSourceRange range;
     chunk.replacement_text = CXStringToString(
                                clang_getDiagnosticFixIt( diagnostic,
                                                          idx,
-                                                         &sourceRange ) );
+                                                         &range ) );
 
-    chunk.range = sourceRange;
+    chunk.range = Range( range );
     fixit.chunks.push_back( chunk );
   }
 
@@ -94,28 +93,32 @@ void BuildFullDiagnosticDataFromChildren(
   full_diagnostic_text.append( diag_text );
 
   // Populate any fixit attached to this diagnostic.
-  FixIt fixit = BuildFixIt( diag_text, diagnostic );
-  if ( fixit.chunks.size() > 0 )
+  FixIt fixit = BuildDiagnosticFixIt( diag_text, diagnostic );
+  if ( !fixit.chunks.empty() ) {
     fixits.push_back( fixit );
+  }
 
   // Note: clang docs say that a CXDiagnosticSet retrieved with
   // clang_getChildDiagnostics do NOT need to be released with
   // clang_diposeDiagnosticSet
   CXDiagnosticSet diag_set = clang_getChildDiagnostics( diagnostic );
 
-  if ( !diag_set )
+  if ( !diag_set ) {
     return;
+  }
 
   size_t num_child_diagnostics = clang_getNumDiagnosticsInSet( diag_set );
 
-  if ( !num_child_diagnostics )
+  if ( !num_child_diagnostics ) {
     return;
+  }
 
   for ( size_t i = 0; i < num_child_diagnostics; ++i ) {
     CXDiagnostic child_diag = clang_getDiagnosticInSet( diag_set, i );
 
-    if( !child_diag )
+    if( !child_diag ) {
       continue;
+    }
 
     full_diagnostic_text.append( "\n" );
 
@@ -130,9 +133,6 @@ void BuildFullDiagnosticDataFromChildren(
 // unavailable completion strings refer to entities that are private/protected,
 // deprecated etc.
 bool CompletionStringAvailable( CXCompletionString completion_string ) {
-  if ( !completion_string )
-    return false;
-
   return clang_getCompletionAvailability( completion_string ) ==
          CXAvailability_Available;
 }
@@ -144,8 +144,7 @@ std::vector< Range > GetRanges( const DiagnosticWrap &diagnostic_wrap ) {
   ranges.reserve( num_ranges );
 
   for ( size_t i = 0; i < num_ranges; ++i ) {
-    ranges.push_back(
-      Range( clang_getDiagnosticRange( diagnostic_wrap.get(), i ) ) );
+    ranges.emplace_back( clang_getDiagnosticRange( diagnostic_wrap.get(), i ) );
   }
 
   return ranges;
@@ -171,8 +170,9 @@ Range GetLocationExtent( CXSourceLocation source_location,
 
   for ( size_t i = 0; i < num_tokens; ++i ) {
     CXToken token = tokens[ i ];
-    if ( clang_getTokenKind( token ) == CXToken_Comment )
+    if ( clang_getTokenKind( token ) == CXToken_Comment ) {
       continue;
+    }
 
     Location token_location( clang_getTokenLocation( translation_unit,
                                                      token ) );
@@ -208,28 +208,30 @@ std::vector< CompletionData > ToCompletionDataVector(
   CXCodeCompleteResults *results ) {
   std::vector< CompletionData > completions;
 
-  if ( !results || !results->Results )
+  if ( !results || !results->Results ) {
     return completions;
+  }
 
   completions.reserve( results->NumResults );
   unordered_map< std::string, size_t > seen_data;
 
   for ( size_t i = 0; i < results->NumResults; ++i ) {
-    CXCompletionResult completion_result = results->Results[ i ];
+    CXCompletionResult result = results->Results[ i ];
+    CXCompletionString completion_string = result.CompletionString;
 
-    if ( !CompletionStringAvailable( completion_result.CompletionString ) )
+    if ( !completion_string ||
+         !CompletionStringAvailable( completion_string ) ) {
       continue;
+    }
 
-    CompletionData data( completion_result );
+    CompletionData data( completion_string, result.CursorKind, results, i );
     size_t index = GetValueElseInsert( seen_data,
-                                     data.original_string_,
-                                     completions.size() );
+                                       data.original_string_,
+                                       completions.size() );
 
     if ( index == completions.size() ) {
       completions.push_back( std::move( data ) );
-    }
-
-    else {
+    } else {
       // If we have already seen this completion, then this is an overload of a
       // function we have seen. We add the signature of the overload to the
       // detailed information.
@@ -245,20 +247,22 @@ std::vector< CompletionData > ToCompletionDataVector(
 }
 
 
-Diagnostic BuildDiagnostic( DiagnosticWrap diagnostic_wrap,
+Diagnostic BuildDiagnostic( const DiagnosticWrap &diagnostic_wrap,
                             CXTranslationUnit translation_unit ) {
   Diagnostic diagnostic;
 
-  if ( !diagnostic_wrap )
+  if ( !diagnostic_wrap ) {
     return diagnostic;
+  }
 
   diagnostic.kind_ = DiagnosticSeverityToType(
                        clang_getDiagnosticSeverity( diagnostic_wrap.get() ) );
 
   // If this is an "ignored" diagnostic, there's no point in continuing since we
   // won't display those to the user
-  if ( diagnostic.kind_ == INFORMATION )
+  if ( diagnostic.kind_ == DiagnosticKind::INFORMATION ) {
     return diagnostic;
+  }
 
   CXSourceLocation source_location =
     clang_getDiagnosticLocation( diagnostic_wrap.get() );

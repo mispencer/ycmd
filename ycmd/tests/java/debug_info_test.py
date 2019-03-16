@@ -28,7 +28,7 @@ from hamcrest import ( assert_that,
                        has_entries,
                        instance_of )
 
-from ycmd.tests.java import SharedYcmd
+from ycmd.tests.java import SharedYcmd, PathToTestFile, DEFAULT_PROJECT_DIR
 from ycmd.tests.test_utils import BuildRequest
 
 
@@ -48,15 +48,17 @@ def DebugInfo_test( app ):
                               instance_of( str ) ),
         'extras': contains(
           has_entries( { 'key': 'Startup Status',
-                         'value': instance_of( str ) } ),
+                         'value': 'Ready' } ),
           has_entries( { 'key': 'Java Path',
                          'value': instance_of( str ) } ),
           has_entries( { 'key': 'Launcher Config.',
                          'value': instance_of( str ) } ),
-          has_entries( { 'key': 'Project Directory',
-                         'value': instance_of( str ) } ),
           has_entries( { 'key': 'Workspace Path',
-                         'value': instance_of( str ) } )
+                         'value': instance_of( str ) } ),
+          has_entries( { 'key': 'Server State',
+                         'value': 'Initialized' } ),
+          has_entries( { 'key': 'Project Directory',
+                         'value': PathToTestFile( DEFAULT_PROJECT_DIR ) } )
         )
       } ) )
     } ) )

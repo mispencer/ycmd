@@ -25,7 +25,9 @@ from builtins import *  # noqa
 import functools
 import os
 
-from ycmd.tests.test_utils import ClearCompletionsCache, IsolatedApp, SetUpApp
+from ycmd.tests.test_utils import ( ClearCompletionsCache,
+                                    IsolatedApp,
+                                    SetUpApp )
 
 shared_app = None
 

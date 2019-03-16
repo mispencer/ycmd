@@ -23,45 +23,47 @@ from __future__ import absolute_import
 from builtins import *  # noqa
 
 from hamcrest import ( assert_that, contains, contains_string, equal_to,
-                       has_entries, has_item )
-from nose import SkipTest
+                       has_entries, has_entry )
 
-from ycmd.tests.cs import PathToTestFile, SharedYcmd, WrapOmniSharpServer
-from ycmd.tests.test_utils import BuildRequest
+from ycmd.tests.cs import ( IsolatedYcmd, PathToTestFile, SharedYcmd,
+                            WrapOmniSharpServer )
+from ycmd.tests.test_utils import ( BuildRequest, LocationMatcher,
+                                    RangeMatcher,
+                                    WaitUntilCompleterServerReady,
+                                    StopCompleterServer )
 from ycmd.utils import ReadFile
 
 
-def Diagnostics_ZeroBasedLineAndColumn_test():
-  yield _Diagnostics_ZeroBasedLineAndColumn_test, False
-  yield _Diagnostics_ZeroBasedLineAndColumn_test, True
-
-
 @SharedYcmd
-def _Diagnostics_ZeroBasedLineAndColumn_test( app, use_roslyn ):
+def Diagnostics_Basic_test( app ):
   filepath = PathToTestFile( 'testy', 'Program.cs' )
-  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
 
     event_data = BuildRequest( filepath = filepath,
-                                event_name = 'FileReadyToParse',
-                                filetype = 'cs',
-                                contents = contents )
+                               event_name = 'FileReadyToParse',
+                               filetype = 'cs',
+                               contents = contents )
+    app.post_json( '/event_notification', event_data )
 
-    results = app.post_json( '/event_notification', event_data ).json
+    diag_data = BuildRequest( filepath = filepath,
+                              filetype = 'cs',
+                              contents = contents,
+                              line_num = 11,
+                              column_num = 2 )
 
+    results = app.post_json( '/detailed_diagnostic', diag_data ).json
     assert_that( results,
-      _Diagnostics_CsCompleter_ExpectedResult( use_roslyn, True ) )
-
-
-def Diagnostics_WithRange_test():
-  yield _Diagnostics_WithRange_test, False
-  yield _Diagnostics_WithRange_test, True
+                 has_entry(
+                     'message',
+                     contains_string(
+                       "Unexpected symbol `}'', expecting identifier" ) ) )
 
 
 @SharedYcmd
-def _Diagnostics_WithRange_test( app, use_roslyn ):
-  filepath = PathToTestFile( 'testy', 'DiagnosticRange.cs' )
-  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+def Diagnostics_ZeroBasedLineAndColumn_test( app ):
+  filepath = PathToTestFile( 'testy', 'Program.cs' )
+  with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
 
     for _ in ( 0, 1 ):  # First call always returns blank for some reason
@@ -72,143 +74,75 @@ def _Diagnostics_WithRange_test( app, use_roslyn ):
 
       results = app.post_json( '/event_notification', event_data ).json
 
-    if use_roslyn:
-      assert_that( results,
-                  has_item(
-                      has_entries( {
-                        'kind': equal_to( 'WARNING' ),
-                        'text': contains_string(
-                            "is assigned but its value is never used" ),
-                        'location': has_entries( {
-                          'line_num': 6,
-                          'column_num': 13
-                        } ),
-                        'location_extent': has_entries( {
-                          'start': has_entries( {
-                            'line_num': 6,
-                            'column_num': 13,
-                          } ),
-                          'end': has_entries( {
-                            'line_num': 6,
-                            'column_num': 16,
-                          } ),
-                        } )
-                      } ) ) )
-    else:
-      assert_that( results,
-                  has_item(
-                      has_entries( {
-                        'kind': equal_to( 'WARNING' ),
-                        'text': contains_string(
-                            "Name should have prefix '_'" ),
-                        'location': has_entries( {
-                          'line_num': 3,
-                          'column_num': 16
-                        } ),
-                        'location_extent': has_entries( {
-                          'start': has_entries( {
-                            'line_num': 3,
-                            'column_num': 16,
-                          } ),
-                          'end': has_entries( {
-                            'line_num': 3,
-                            'column_num': 25,
-                          } ),
-                        } )
-                      } ) ) )
-
-
-def Diagnostics_MultipleSolution_test():
-  yield _Diagnostics_MultipleSolution_test, False
-  yield _Diagnostics_MultipleSolution_test, True
+    assert_that( results, contains(
+      has_entries( {
+        'kind': equal_to( 'ERROR' ),
+        'text': contains_string(
+            "Unexpected symbol `}'', expecting identifier" ),
+        'location': LocationMatcher( filepath, 11, 2 ),
+        'location_extent': RangeMatcher( filepath, ( 11, 2 ), ( 11, 2 ) ),
+      } )
+    ) )
 
 
 @SharedYcmd
-def _Diagnostics_MultipleSolution_test( app, use_roslyn ):
+def Diagnostics_WithRange_test( app ):
+  filepath = PathToTestFile( 'testy', 'DiagnosticRange.cs' )
+  with WrapOmniSharpServer( app, filepath ):
+    contents = ReadFile( filepath )
+
+    for _ in ( 0, 1 ):  # First call always returns blank for some reason
+      event_data = BuildRequest( filepath = filepath,
+                                 event_name = 'FileReadyToParse',
+                                 filetype = 'cs',
+                                 contents = contents )
+
+      results = app.post_json( '/event_notification', event_data ).json
+
+    assert_that( results, contains(
+      has_entries( {
+        'kind': equal_to( 'WARNING' ),
+        'text': contains_string( "Name should have prefix '_'" ),
+        'location': LocationMatcher( filepath, 3, 16 ),
+        'location_extent': RangeMatcher( filepath, ( 3, 16 ), ( 3, 25 ) )
+      } )
+    ) )
+
+
+@SharedYcmd
+def Diagnostics_MultipleSolution_test( app ):
   filepaths = [ PathToTestFile( 'testy', 'Program.cs' ),
                 PathToTestFile( 'testy-multiple-solutions',
                                 'solution-named-like-folder',
                                 'testy', 'Program.cs' ) ]
-  main_errors = [ True, False ]
-  for filepath, main_error in zip( filepaths, main_errors ):
-    with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  lines = [ 11, 10 ]
+  for filepath, line in zip( filepaths, lines ):
+    with WrapOmniSharpServer( app, filepath ):
       contents = ReadFile( filepath )
 
-      event_data = BuildRequest( filepath = filepath,
-                                  event_name = 'FileReadyToParse',
-                                  filetype = 'cs',
-                                  contents = contents )
+      for _ in ( 0, 1 ):  # First call always returns blank for some reason
+        event_data = BuildRequest( filepath = filepath,
+                                   event_name = 'FileReadyToParse',
+                                   filetype = 'cs',
+                                   contents = contents )
 
-      results = app.post_json( '/event_notification', event_data ).json
+        results = app.post_json( '/event_notification', event_data ).json
 
-      assert_that( results,
-        _Diagnostics_CsCompleter_ExpectedResult( use_roslyn, main_error ) )
-
-
-def _Diagnostics_CsCompleter_ExpectedResult( use_roslyn, flag ):
-  def build_matcher( kind, message, line, column,
-                     end_line = -1, end_column = -1 ):
-    end_column = end_column if end_column >= 0 else column
-    end_line = end_line if end_line >= 0 else line
-    return has_entries( {
-      'kind': equal_to( kind ),
-      'text': contains_string( message ),
-      'location': has_entries( {
-        'line_num': line,
-        'column_num': column
-      } ),
-      'location_extent': has_entries( {
-        'start': has_entries( {
-          'line_num': line,
-          'column_num': column
-        } ),
-        'end': has_entries( {
-          'line_num': end_line,
-          'column_num': end_column
-        } ),
-      } )
-    } )
-  entries = []
-  if use_roslyn:
-    entries.append(
-      build_matcher( 'ERROR', "Identifier expected", 10, 12 )
-    )
-    entries.append(
-      build_matcher( 'ERROR', "; expected", 10, 12 ),
-    )
-    entries.append(
-      build_matcher( 'ERROR',
-        "'Console' does not contain a definition for ''", 11, 1 ),
-    )
-    entries.append(
-      build_matcher( 'WARNING',
-        "is assigned but its value is never used", 9, 8, 9, 11 ),
-    )
-    # if flag:
-    #   entries.append(
-    #     build_matcher( 'ERROR',
-    #       "Program has more than one entry point defined. Compile with /main"
-    #       + " to specify the type that contains the entry point.", 7, 22 ),
-    #   )
-  else:
-    entries.append(
-      build_matcher( 'ERROR', "Unexpected symbol `}'', expecting identifier",
-                      11, 2 )
-    )
-  return contains( *entries )
-
-
-def Diagnostics_HandleZeroColumnDiagnostic_test():
-  yield _Diagnostics_HandleZeroColumnDiagnostic_test, False
-  yield _Diagnostics_HandleZeroColumnDiagnostic_test, True
+      assert_that( results, contains(
+        has_entries( {
+          'kind': equal_to( 'ERROR' ),
+          'text': contains_string( "Unexpected symbol `}'', "
+                                   "expecting identifier" ),
+          'location': LocationMatcher( filepath, line, 2 ),
+          'location_extent': RangeMatcher( filepath, ( line, 2 ), ( line, 2 ) )
+        } )
+      ) )
 
 
 @SharedYcmd
-def _Diagnostics_HandleZeroColumnDiagnostic_test( app, use_roslyn ):
-  if ( use_roslyn ):
-    raise SkipTest( "Not aware of anywhere that Roslyn returns this" )
+def Diagnostics_HandleZeroColumnDiagnostic_test( app ):
   filepath = PathToTestFile( 'testy', 'ZeroColumnDiagnostic.cs' )
-  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
 
     for _ in ( 0, 1 ):  # First call always returns blank for some reason
@@ -219,25 +153,52 @@ def _Diagnostics_HandleZeroColumnDiagnostic_test( app, use_roslyn ):
 
       results = app.post_json( '/event_notification', event_data ).json
 
-    assert_that( results,
-                 contains(
-                     has_entries( {
-                       'kind': equal_to( 'ERROR' ),
-                       'text': contains_string(
-                           "Unexpected symbol `}'', "
-                           "expecting `;'', `{'', or `where''" ),
-                       'location': has_entries( {
-                         'line_num': 3,
-                         'column_num': 1
-                       } ),
-                       'location_extent': has_entries( {
-                         'start': has_entries( {
-                           'line_num': 3,
-                           'column_num': 1,
-                         } ),
-                         'end': has_entries( {
-                           'line_num': 3,
-                           'column_num': 1,
-                         } ),
-                       } )
-                     } ) ) )
+    assert_that( results, contains(
+      has_entries( {
+        'kind': equal_to( 'ERROR' ),
+        'text': contains_string( "Unexpected symbol `}'', "
+                                 "expecting `;'', `{'', or `where''" ),
+        'location': LocationMatcher( filepath, 3, 1 ),
+        'location_extent': RangeMatcher( filepath, ( 3, 1 ), ( 3, 1 ) )
+      } )
+    ) )
+
+
+@IsolatedYcmd( { 'max_diagnostics_to_display': 1 } )
+def Diagnostics_MaximumDiagnosticsNumberExceeded_test( app ):
+  filepath = PathToTestFile( 'testy', 'MaxDiagnostics.cs' )
+  contents = ReadFile( filepath )
+
+  event_data = BuildRequest( filepath = filepath,
+                             event_name = 'FileReadyToParse',
+                             filetype = 'cs',
+                             contents = contents )
+
+  app.post_json( '/event_notification', event_data ).json
+  WaitUntilCompleterServerReady( app, 'cs' )
+
+  event_data = BuildRequest( filepath = filepath,
+                             event_name = 'FileReadyToParse',
+                             filetype = 'cs',
+                             contents = contents )
+
+  results = app.post_json( '/event_notification', event_data ).json
+
+  assert_that( results, contains(
+    has_entries( {
+      'kind': equal_to( 'ERROR' ),
+      'text': contains_string( "The type `MaxDiagnostics'' already contains "
+                               "a definition for `test''" ),
+      'location': LocationMatcher( filepath, 4, 16 ),
+      'location_extent': RangeMatcher( filepath, ( 4, 16 ), ( 4, 16 ) )
+    } ),
+    has_entries( {
+      'kind': equal_to( 'ERROR' ),
+      'text': contains_string( 'Maximum number of diagnostics exceeded.' ),
+      'location': LocationMatcher( filepath, 1, 1 ),
+      'location_extent': RangeMatcher( filepath, ( 1, 1 ), ( 1, 1 ) ),
+      'ranges': contains( RangeMatcher( filepath, ( 1, 1 ), ( 1, 1 ) ) )
+    } )
+  ) )
+
+  StopCompleterServer( app, 'cs', filepath )

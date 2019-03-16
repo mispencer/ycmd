@@ -1,6 +1,6 @@
 # encoding: utf-8
 #
-# Copyright (C) 2011, 2012 Google Inc.
+# Copyright (C) 2011-2019 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -25,12 +25,21 @@ from __future__ import absolute_import
 from builtins import *  # noqa
 
 from future.utils import PY2, native
+import copy
+import json
+import logging
 import os
 import socket
 import subprocess
 import sys
 import tempfile
 import time
+import threading
+
+LOGGER = logging.getLogger( 'ycmd' )
+ROOT_DIR = os.path.normpath( os.path.join( os.path.dirname( __file__ ), '..' ) )
+DIR_OF_THIRD_PARTY = os.path.join( ROOT_DIR, 'third_party' )
+LIBCLANG_DIR = os.path.join( DIR_OF_THIRD_PARTY, 'clang', 'lib' )
 
 
 # Idiom to import pathname2url, url2pathname, urljoin, and urlparse on Python 2
@@ -40,11 +49,24 @@ import time
 #   from ycmd.utils import pathname2url, url2pathname, urljoin, urlparse
 #
 if PY2:
-  from urlparse import urljoin, urlparse
-  from urllib import pathname2url, url2pathname
+  from collections import Mapping
+  from urlparse import urljoin, urlparse, unquote
+  from urllib import pathname2url, url2pathname, quote
 else:
-  from urllib.parse import urljoin, urlparse  # noqa
+  from collections.abc import Mapping  # noqa
+  from urllib.parse import urljoin, urlparse, unquote, quote  # noqa
   from urllib.request import pathname2url, url2pathname  # noqa
+
+
+# We replace the re module with regex as it has better support for characters on
+# multiple code points. However, this module has a compiled component so we
+# can't import it in YCM if it is built for a different version of Python (e.g.
+# if YCM is running on Python 2 while ycmd on Python 3). We fall back to the re
+# module in that case.
+try:
+  import regex as re
+except ImportError: # pragma: no cover
+  import re # noqa
 
 
 # Creation flag to disable creating a console window on Windows. See
@@ -52,6 +74,45 @@ else:
 CREATE_NO_WINDOW = 0x08000000
 
 EXECUTABLE_FILE_MASK = os.F_OK | os.X_OK
+
+CORE_MISSING_ERROR_REGEX = re.compile( "No module named '?ycm_core'?" )
+CORE_PYTHON2_ERROR_REGEX = re.compile(
+  'dynamic module does not define (?:init|module export) '
+  'function \\(PyInit_ycm_core\\)|'
+  'Module use of python2[0-9]\\.dll conflicts with this version of Python\\.$' )
+CORE_PYTHON3_ERROR_REGEX = re.compile(
+  'dynamic module does not define init function \\(initycm_core\\)|'
+  'Module use of python3[0-9]\\.dll conflicts with this version of Python\\.$' )
+
+CORE_MISSING_MESSAGE = (
+  'ycm_core library not detected; you need to compile it by running the '
+  'build.py script. See the documentation for more details.' )
+CORE_PYTHON2_MESSAGE = (
+  'ycm_core library compiled for Python 2 but loaded in Python 3.' )
+CORE_PYTHON3_MESSAGE = (
+  'ycm_core library compiled for Python 3 but loaded in Python 2.' )
+CORE_OUTDATED_MESSAGE = (
+  'ycm_core library too old; PLEASE RECOMPILE by running the build.py script. '
+  'See the documentation for more details.' )
+
+# Exit statuses returned by the CompatibleWithCurrentCore function:
+#  - CORE_COMPATIBLE_STATUS: ycm_core is compatible;
+#  - CORE_UNEXPECTED_STATUS: unexpected error while loading ycm_core;
+#  - CORE_MISSING_STATUS   : ycm_core is missing;
+#  - CORE_PYTHON2_STATUS   : ycm_core is compiled with Python 2 but loaded with
+#    Python 3;
+#  - CORE_PYTHON3_STATUS   : ycm_core is compiled with Python 3 but loaded with
+#    Python 2;
+#  - CORE_OUTDATED_STATUS  : ycm_core version is outdated.
+# Values 1 and 2 are not used because 1 is for general errors and 2 has often a
+# special meaning for Unix programs. See
+# https://docs.python.org/2/library/sys.html#sys.exit
+CORE_COMPATIBLE_STATUS  = 0
+CORE_UNEXPECTED_STATUS  = 3
+CORE_MISSING_STATUS     = 4
+CORE_PYTHON2_STATUS     = 5
+CORE_PYTHON3_STATUS     = 6
+CORE_OUTDATED_STATUS    = 7
 
 
 # Python 3 complains on the common open(path).read() idiom because the file
@@ -282,6 +343,12 @@ def ExecutableName( executable ):
   return executable + ( '.exe' if OnWindows() else '' )
 
 
+def ExpandVariablesInPath( path ):
+  # Replace '~' with the home directory and expand environment variables in
+  # path.
+  return os.path.expanduser( os.path.expandvars( path ) )
+
+
 def OnWindows():
   return sys.platform == 'win32'
 
@@ -317,21 +384,39 @@ def CloseStandardStreams( handle ):
       stream.close()
 
 
+def IsRootDirectory( path, parent ):
+  return path == parent
+
+
 def PathsToAllParentFolders( path ):
   folder = os.path.normpath( path )
   if os.path.isdir( folder ):
     yield folder
   while True:
     parent = os.path.dirname( folder )
-    if parent == folder:
+    if IsRootDirectory( folder, parent ):
       break
     folder = parent
     yield folder
 
 
-def ForceSemanticCompletion( request_data ):
-  return ( 'force_semantic' in request_data and
-           bool( request_data[ 'force_semantic' ] ) )
+def PathLeftSplit( path ):
+  """Split a path as (head, tail) where head is the part before the first path
+  separator and tail is everything after. If the path is absolute, head is the
+  root component, tail everything else. If there is no separator, head is the
+  whole path and tail the empty string."""
+  drive, path = os.path.splitdrive( path )
+  separators = '/\\' if OnWindows() else '/'
+  path_length = len( path )
+  offset = 0
+  while offset < path_length and path[ offset ] not in separators:
+    offset += 1
+  if offset == path_length:
+    return drive + path, ''
+  tail = path[ offset + 1 : ].rstrip( separators )
+  if offset == 0:
+    return drive + path[ 0 ], tail
+  return drive + path[ : offset ], tail
 
 
 # A wrapper for subprocess.Popen that fixes quirks on Windows.
@@ -388,7 +473,7 @@ def GetShortPathName( path ):
   _GetShortPathNameW = windll.kernel32.GetShortPathNameW
   _GetShortPathNameW.argtypes = [ wintypes.LPCWSTR,
                                   wintypes.LPWSTR,
-                                  wintypes.DWORD]
+                                  wintypes.DWORD ]
   _GetShortPathNameW.restype = wintypes.DWORD
 
   output_buf_size = 0
@@ -422,46 +507,16 @@ def LoadPythonSource( name, pathname ):
 
 
 def SplitLines( contents ):
-  """Return a list of each of the lines in the unicode string |contents|.
-  Behaviour is equivalent to str.splitlines with the following exceptions:
-    - empty strings are returned as [ '' ]
-    - a trailing newline is not ignored (i.e. SplitLines( '\n' )
-      returns [ '', '' ], not [ '' ]"""
+  """Return a list of each of the lines in the unicode string |contents|."""
 
   # We often want to get a list representation of a buffer such that we can
   # index all of the 'lines' within it. Python provides str.splitlines for this
-  # purpose, but its documented behaviors for empty strings and strings ending
-  # with a newline character are not compatible with this. As a result, we write
-  # our own wrapper to provide a splitlines implementation which returns the
-  # actual list of indexable lines in a buffer, where a line may have 0
-  # characters.
-  #
-  # NOTE: str.split( '\n' ) actually gives this behaviour, except it does not
-  # work when running on a unix-like system and reading a file with Windows line
-  # endings.
-
-  # ''.splitlines() returns [], but we want [ '' ]
-  if contents == '':
-    return [ '' ]
-
-  lines = contents.splitlines()
-
-  # '\n'.splitlines() returns [ '' ]. We want [ '', '' ].
-  # '\n\n\n'.splitlines() returns [ '', '', '' ]. We want [ '', '', '', '' ].
-  #
-  # So we re-instate the empty entry at the end if the original string ends
-  # with a newline. Universal newlines recognise the following as
-  # line-terminators:
-  #   - '\n'
-  #   - '\r\n'
-  #   - '\r'
-  #
-  # Importantly, notice that \r\n also ends with \n
-  #
-  if contents.endswith( '\r' ) or contents.endswith( '\n' ):
-    lines.append( '' )
-
-  return lines
+  # purpose. However, this method not only splits on newline characters (\n,
+  # \r\n, and \r) but also on line boundaries like \v and \f. Since old
+  # Macintosh newlines (\r) are obsolete and Windows newlines (\r\n) end with a
+  # \n character, we can ignore carriage return characters (\r) and only split
+  # on \n.
+  return contents.split( '\n' )
 
 
 def GetCurrentDirectory():
@@ -476,3 +531,132 @@ def GetCurrentDirectory():
   # OSError.
   except OSError:
     return tempfile.gettempdir()
+
+
+def StartThread( func, *args ):
+  thread = threading.Thread( target = func, args = args )
+  thread.daemon = True
+  thread.start()
+  return thread
+
+
+class HashableDict( Mapping ):
+  """An immutable dictionary that can be used in dictionary's keys. The
+  dictionary must be JSON-encodable; in particular, all keys must be strings."""
+
+  def __init__( self, *args, **kwargs ):
+    self._dict = dict( *args, **kwargs )
+
+
+  def __getitem__( self, key ):
+    return copy.deepcopy( self._dict[ key ] )
+
+
+  def __iter__( self ):
+    return iter( self._dict )
+
+
+  def __len__( self ):
+    return len( self._dict )
+
+
+  def __repr__( self ):
+    return '<HashableDict %s>' % repr( self._dict )
+
+
+  def __hash__( self ):
+    try:
+      return self._hash
+    except AttributeError:
+      self._hash = json.dumps( self._dict, sort_keys = True ).__hash__()
+      return self._hash
+
+
+  def __eq__( self, other ):
+    return isinstance( other, HashableDict ) and self._dict == other._dict
+
+
+  def __ne__( self, other ):
+    return not self == other
+
+
+def ListDirectory( path ):
+  try:
+    # Path must be a Unicode string to get Unicode strings out of listdir.
+    return os.listdir( ToUnicode( path ) )
+  except Exception:
+    LOGGER.exception( 'Error while listing %s folder', path )
+    return []
+
+
+def GetModificationTime( path ):
+  try:
+    return os.path.getmtime( path )
+  except OSError:
+    LOGGER.exception( 'Cannot get modification time for path %s', path )
+    return 0
+
+
+def ExpectedCoreVersion():
+  return int( ReadFile( os.path.join( ROOT_DIR, 'CORE_VERSION' ) ) )
+
+
+def LoadYcmCoreDependencies():
+  for name in ListDirectory( LIBCLANG_DIR ):
+    if name.startswith( 'libclang' ):
+      libclang_path = os.path.join( LIBCLANG_DIR, name )
+      if os.path.isfile( libclang_path ):
+        import ctypes
+        ctypes.cdll.LoadLibrary( libclang_path )
+        return
+
+
+def ImportCore():
+  """Imports and returns the ycm_core module. This function exists for easily
+  mocking this import in tests."""
+  import ycm_core as ycm_core
+  return ycm_core
+
+
+def ImportAndCheckCore():
+  """Checks if ycm_core library is compatible and returns with an exit
+  status."""
+  try:
+    LoadYcmCoreDependencies()
+    ycm_core = ImportCore()
+  except ImportError as error:
+    message = str( error )
+    if CORE_MISSING_ERROR_REGEX.match( message ):
+      LOGGER.exception( CORE_MISSING_MESSAGE )
+      return CORE_MISSING_STATUS
+    if CORE_PYTHON2_ERROR_REGEX.match( message ):
+      LOGGER.exception( CORE_PYTHON2_MESSAGE )
+      return CORE_PYTHON2_STATUS
+    if CORE_PYTHON3_ERROR_REGEX.match( message ):
+      LOGGER.exception( CORE_PYTHON3_MESSAGE )
+      return CORE_PYTHON3_STATUS
+    LOGGER.exception( message )
+    return CORE_UNEXPECTED_STATUS
+
+  try:
+    current_core_version = ycm_core.YcmCoreVersion()
+  except AttributeError:
+    LOGGER.exception( CORE_OUTDATED_MESSAGE )
+    return CORE_OUTDATED_STATUS
+
+  if ExpectedCoreVersion() != current_core_version:
+    LOGGER.error( CORE_OUTDATED_MESSAGE )
+    return CORE_OUTDATED_STATUS
+
+  return CORE_COMPATIBLE_STATUS
+
+
+def GetClangResourceDir():
+  resource_dir = os.path.join( LIBCLANG_DIR, 'clang' )
+  for version in ListDirectory( resource_dir ):
+    return os.path.join( resource_dir, version )
+
+  raise RuntimeError( 'Cannot find Clang resource directory.' )
+
+
+CLANG_RESOURCE_DIR = GetClangResourceDir()

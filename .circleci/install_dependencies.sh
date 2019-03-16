@@ -7,25 +7,25 @@ set -e
 # Homebrew setup
 ################
 
-# There's a homebrew bug which causes brew update to fail the first time. Run
+# There's a Homebrew bug which causes brew update to fail the first time. Run
 # it twice to workaround. https://github.com/Homebrew/homebrew/issues/42553
 brew update || brew update
 
-# List of homebrew formulae to install in the order they appear.
-# We require CMake, Node, Go, Mono and Ninja for our build and tests, and all
-# the others are dependencies of pyenv.
+# List of Homebrew formulae to install in the order they appear.
+# We require CMake, Node, and Go for our build and tests, and all
+# the others are dependencies of pyenv. Mono is not installed through Homebrew
+# because the latest version (5.12.0.226_1) fails to build the OmniSharp server
+# with CS7027 signing errors.
 REQUIREMENTS="cmake
               node.js
               go
-              mono
-              ninja
               readline
               autoconf
               pkg-config
               openssl
               libuv"
 
-# Install CMake, Node, Go, Mono, Ninja, pyenv and dependencies.
+# Install CMake, Node, Go, pyenv and dependencies.
 for pkg in $REQUIREMENTS; do
   # Install package, or upgrade it if it is already installed.
   brew install $pkg || brew outdated $pkg || brew upgrade $pkg
@@ -51,11 +51,14 @@ PATH="${PYENV_ROOT}/bin:${PATH}"
 eval "$(pyenv init -)"
 
 if [ "${YCMD_PYTHON_VERSION}" == "2.7" ]; then
-  # We need a recent enough version of Python 2.7 on macOS or an error occurs
-  # when installing the psutil dependency for our tests.
-  PYENV_VERSION="2.7.8"
+  # Versions prior to 2.7.2 fail to compile with error "ld: library not found
+  # for -lSystemStubs"
+  # FIXME: pip 10 fails to upgrade packages on Python 2.7.3 or older. See
+  # https://github.com/pypa/pip/issues/5231 for the error. Revert to 2.7.2 once
+  # this is fixed in pip.
+  PYENV_VERSION="2.7.4"
 else
-  PYENV_VERSION="3.3.6"
+  PYENV_VERSION="3.4.0"
 fi
 
 # In order to work with ycmd, python *must* be built as a shared library. The
@@ -77,13 +80,24 @@ echo '  eval "$(pyenv init -)"' >> $BASH_ENV
 echo '  unset PYENV_LOADING' >> $BASH_ENV
 echo 'fi' >> $BASH_ENV
 
-pip install -U pip wheel setuptools
 pip install -r test_requirements.txt
 
 # Enable coverage for Python subprocesses. See:
 # http://coverage.readthedocs.io/en/latest/subprocess.html
 echo -e "import coverage\ncoverage.process_startup()" > \
   ${PYENV_ROOT}/versions/${PYENV_VERSION}/lib/python${YCMD_PYTHON_VERSION}/site-packages/sitecustomize.py
+
+##########
+# C# setup
+##########
+
+MONO_PATH="${HOME}/mono"
+if [ ! -f "${MONO_PATH}/mono-5.12.0.pkg" ]; then
+  mkdir -p ${MONO_PATH}
+  curl https://download.mono-project.com/archive/5.12.0/macos-10-universal/MonoFramework-MDK-5.12.0.226.macos10.xamarin.universal.pkg -o ${MONO_PATH}/mono-5.12.0.pkg
+fi
+sudo installer -pkg ${MONO_PATH}/mono-5.12.0.pkg -target /
+echo "export PATH=/Library/Frameworks/Mono.framework/Versions/Current/Commands:\$PATH" >> $BASH_ENV
 
 ############
 # Rust setup
@@ -98,12 +112,6 @@ rustc -Vv
 cargo -V
 
 echo "export PATH=${CARGO_PATH}:\$PATH" >> $BASH_ENV
-
-##################
-# TypeScript setup
-##################
-
-npm install -g typescript
 
 #################
 # Java 8 setup

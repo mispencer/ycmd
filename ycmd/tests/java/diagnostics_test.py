@@ -1,4 +1,4 @@
-# Copyright (C) 2017 ycmd contributors
+# Copyright (C) 2017-2018 ycmd contributors
 # encoding: utf-8
 #
 # This file is part of ycmd.
@@ -25,7 +25,6 @@ from builtins import *  # noqa
 
 import time
 import json
-import threading
 from future.utils import iterkeys
 from hamcrest import ( assert_that,
                        contains,
@@ -44,8 +43,9 @@ from ycmd.tests.java import ( DEFAULT_PROJECT_DIR,
                               SharedYcmd,
                               StartJavaCompleterServerInDirectory )
 
-from ycmd.tests.test_utils import BuildRequest, LocationMatcher
-from ycmd.utils import ReadFile
+from ycmd.tests.test_utils import ( BuildRequest, LocationMatcher, RangeMatcher,
+                                    WithRetry )
+from ycmd.utils import ReadFile, StartThread
 from ycmd.completers import completer
 
 from pprint import pformat
@@ -53,13 +53,6 @@ from mock import patch
 from ycmd.completers.language_server import language_server_protocol as lsp
 from ycmd import handlers
 
-
-
-def RangeMatch( filepath, start, end ):
-  return has_entries( {
-    'start': LocationMatcher( filepath, *start ),
-    'end': LocationMatcher( filepath, *end ),
-  } )
 
 
 def ProjectPath( *args ):
@@ -70,6 +63,7 @@ def ProjectPath( *args ):
                          *args )
 
 
+ProjectRoot = PathToTestFile( DEFAULT_PROJECT_DIR )
 InternalNonProjectFile = PathToTestFile( DEFAULT_PROJECT_DIR, 'test.java' )
 TestFactory = ProjectPath( 'TestFactory.java' )
 TestLauncher = ProjectPath( 'TestLauncher.java' )
@@ -81,46 +75,47 @@ youcompleteme_Test = PathToTestFile( DEFAULT_PROJECT_DIR,
                                      'Test.java' )
 
 DIAG_MATCHERS_PER_FILE = {
+  ProjectRoot: [],
   InternalNonProjectFile: [],
   TestFactory: contains_inanyorder(
     has_entries( {
       'kind': 'WARNING',
       'text': 'The value of the field TestFactory.Bar.testString is not used',
       'location': LocationMatcher( TestFactory, 15, 19 ),
-      'location_extent': RangeMatch( TestFactory, ( 15, 19 ), ( 15, 29 ) ),
-      'ranges': contains( RangeMatch( TestFactory, ( 15, 19 ), ( 15, 29 ) ) ),
+      'location_extent': RangeMatcher( TestFactory, ( 15, 19 ), ( 15, 29 ) ),
+      'ranges': contains( RangeMatcher( TestFactory, ( 15, 19 ), ( 15, 29 ) ) ),
       'fixit_available': False
     } ),
     has_entries( {
       'kind': 'ERROR',
       'text': 'Wibble cannot be resolved to a type',
       'location': LocationMatcher( TestFactory, 18, 24 ),
-      'location_extent': RangeMatch( TestFactory, ( 18, 24 ), ( 18, 30 ) ),
-      'ranges': contains( RangeMatch( TestFactory, ( 18, 24 ), ( 18, 30 ) ) ),
+      'location_extent': RangeMatcher( TestFactory, ( 18, 24 ), ( 18, 30 ) ),
+      'ranges': contains( RangeMatcher( TestFactory, ( 18, 24 ), ( 18, 30 ) ) ),
       'fixit_available': False
     } ),
     has_entries( {
       'kind': 'ERROR',
       'text': 'Wibble cannot be resolved to a variable',
       'location': LocationMatcher( TestFactory, 19, 15 ),
-      'location_extent': RangeMatch( TestFactory, ( 19, 15 ), ( 19, 21 ) ),
-      'ranges': contains( RangeMatch( TestFactory, ( 19, 15 ), ( 19, 21 ) ) ),
+      'location_extent': RangeMatcher( TestFactory, ( 19, 15 ), ( 19, 21 ) ),
+      'ranges': contains( RangeMatcher( TestFactory, ( 19, 15 ), ( 19, 21 ) ) ),
       'fixit_available': False
     } ),
     has_entries( {
       'kind': 'ERROR',
       'text': 'Type mismatch: cannot convert from int to boolean',
       'location': LocationMatcher( TestFactory, 27, 10 ),
-      'location_extent': RangeMatch( TestFactory, ( 27, 10 ), ( 27, 16 ) ),
-      'ranges': contains( RangeMatch( TestFactory, ( 27, 10 ), ( 27, 16 ) ) ),
+      'location_extent': RangeMatcher( TestFactory, ( 27, 10 ), ( 27, 16 ) ),
+      'ranges': contains( RangeMatcher( TestFactory, ( 27, 10 ), ( 27, 16 ) ) ),
       'fixit_available': False
     } ),
     has_entries( {
       'kind': 'ERROR',
       'text': 'Type mismatch: cannot convert from int to boolean',
       'location': LocationMatcher( TestFactory, 30, 10 ),
-      'location_extent': RangeMatch( TestFactory, ( 30, 10 ), ( 30, 16 ) ),
-      'ranges': contains( RangeMatch( TestFactory, ( 30, 10 ), ( 30, 16 ) ) ),
+      'location_extent': RangeMatcher( TestFactory, ( 30, 10 ), ( 30, 16 ) ),
+      'ranges': contains( RangeMatcher( TestFactory, ( 30, 10 ), ( 30, 16 ) ) ),
       'fixit_available': False
     } ),
     has_entries( {
@@ -129,8 +124,8 @@ DIAG_MATCHERS_PER_FILE = {
               'AbstractTestWidget is not applicable for the arguments '
               '(TestFactory.Bar)',
       'location': LocationMatcher( TestFactory, 30, 23 ),
-      'location_extent': RangeMatch( TestFactory, ( 30, 23 ), ( 30, 47 ) ),
-      'ranges': contains( RangeMatch( TestFactory, ( 30, 23 ), ( 30, 47 ) ) ),
+      'location_extent': RangeMatcher( TestFactory, ( 30, 23 ), ( 30, 47 ) ),
+      'ranges': contains( RangeMatcher( TestFactory, ( 30, 23 ), ( 30, 47 ) ) ),
       'fixit_available': False
     } ),
   ),
@@ -139,20 +134,44 @@ DIAG_MATCHERS_PER_FILE = {
       'kind': 'WARNING',
       'text': 'The value of the local variable a is not used',
       'location': LocationMatcher( TestWidgetImpl, 15, 9 ),
-      'location_extent': RangeMatch( TestWidgetImpl, ( 15, 9 ), ( 15, 10 ) ),
-      'ranges': contains( RangeMatch( TestWidgetImpl, ( 15, 9 ), ( 15, 10 ) ) ),
+      'location_extent': RangeMatcher( TestWidgetImpl, ( 15, 9 ), ( 15, 10 ) ),
+      'ranges': contains( RangeMatcher( TestWidgetImpl,
+                                        ( 15, 9 ),
+                                        ( 15, 10 ) ) ),
+      'fixit_available': False
+    } ),
+    has_entries( {
+      'kind': 'ERROR',
+      'text': 'ISR cannot be resolved to a variable',
+      'location': LocationMatcher( TestWidgetImpl, 34, 12 ),
+      'location_extent': RangeMatcher( TestWidgetImpl, ( 34, 12 ), ( 34, 15 ) ),
+      'ranges': contains( RangeMatcher( TestWidgetImpl,
+                                        ( 34, 12 ),
+                                        ( 34, 15 ) ) ),
+      'fixit_available': False
+    } ),
+    has_entries( {
+      'kind': 'ERROR',
+      'text': 'Syntax error, insert ";" to complete BlockStatements',
+      'location': LocationMatcher( TestWidgetImpl, 34, 12 ),
+      'location_extent': RangeMatcher( TestWidgetImpl, ( 34, 12 ), ( 34, 15 ) ),
+      'ranges': contains( RangeMatcher( TestWidgetImpl,
+                                        ( 34, 12 ),
+                                        ( 34, 15 ) ) ),
       'fixit_available': False
     } ),
   ),
-  TestLauncher: contains_inanyorder (
+  TestLauncher: contains_inanyorder(
     has_entries( {
       'kind': 'ERROR',
       'text': 'The type new TestLauncher.Launchable(){} must implement the '
               'inherited abstract method TestLauncher.Launchable.launch('
               'TestFactory)',
       'location': LocationMatcher( TestLauncher, 28, 16 ),
-      'location_extent': RangeMatch( TestLauncher, ( 28, 16 ), ( 28, 28 ) ),
-      'ranges': contains( RangeMatch( TestLauncher, ( 28, 16 ), ( 28, 28 ) ) ),
+      'location_extent': RangeMatcher( TestLauncher, ( 28, 16 ), ( 28, 28 ) ),
+      'ranges': contains( RangeMatcher( TestLauncher,
+                                        ( 28, 16 ),
+                                        ( 28, 28 ) ) ),
       'fixit_available': False
     } ),
     has_entries( {
@@ -160,16 +179,20 @@ DIAG_MATCHERS_PER_FILE = {
       'text': 'The method launch() of type new TestLauncher.Launchable(){} '
               'must override or implement a supertype method',
       'location': LocationMatcher( TestLauncher, 30, 19 ),
-      'location_extent': RangeMatch( TestLauncher, ( 30, 19 ), ( 30, 27 ) ),
-      'ranges': contains( RangeMatch( TestLauncher, ( 30, 19 ), ( 30, 27 ) ) ),
+      'location_extent': RangeMatcher( TestLauncher, ( 30, 19 ), ( 30, 27 ) ),
+      'ranges': contains( RangeMatcher( TestLauncher,
+                                        ( 30, 19 ),
+                                        ( 30, 27 ) ) ),
       'fixit_available': False
     } ),
     has_entries( {
       'kind': 'ERROR',
       'text': 'Cannot make a static reference to the non-static field factory',
       'location': LocationMatcher( TestLauncher, 31, 32 ),
-      'location_extent': RangeMatch( TestLauncher, ( 31, 32 ), ( 31, 39 ) ),
-      'ranges': contains( RangeMatch( TestLauncher, ( 31, 32 ), ( 31, 39 ) ) ),
+      'location_extent': RangeMatcher( TestLauncher, ( 31, 32 ), ( 31, 39 ) ),
+      'ranges': contains( RangeMatcher( TestLauncher,
+                                        ( 31, 32 ),
+                                        ( 31, 39 ) ) ),
       'fixit_available': False
     } ),
   ),
@@ -179,24 +202,24 @@ DIAG_MATCHERS_PER_FILE = {
       'text': 'The method doUnicødeTes() in the type Test is not applicable '
               'for the arguments (String)',
       'location': LocationMatcher( youcompleteme_Test, 13, 10 ),
-      'location_extent': RangeMatch( youcompleteme_Test,
-                                     ( 13, 10 ),
-                                     ( 13, 23 ) ),
-      'ranges': contains( RangeMatch( youcompleteme_Test,
-                                      ( 13, 10 ),
-                                      ( 13, 23 ) ) ),
+      'location_extent': RangeMatcher( youcompleteme_Test,
+                                       ( 13, 10 ),
+                                       ( 13, 23 ) ),
+      'ranges': contains( RangeMatcher( youcompleteme_Test,
+                                        ( 13, 10 ),
+                                        ( 13, 23 ) ) ),
       'fixit_available': False
     } ),
   ),
 }
 
 
-def _WaitForDiagnoticsForFile( app,
-                               filepath,
-                               contents,
-                               diags_filepath,
-                               diags_are_ready = lambda d: True,
-                               **kwargs ):
+def _WaitForDiagnosticsForFile( app,
+                                filepath,
+                                contents,
+                                diags_filepath,
+                                diags_are_ready = lambda d: True,
+                                **kwargs ):
   diags = None
   try:
     for message in PollForMessages( app,
@@ -222,7 +245,7 @@ def _WaitForDiagnoticsForFile( app,
   return diags
 
 
-def _WaitForDiagnoticsToBeReaady( app, filepath, contents, **kwargs ):
+def _WaitForDiagnosticsToBeReady( app, filepath, contents, **kwargs ):
   results = None
   for tries in range( 0, 60 ):
     event_data = BuildRequest( event_name = 'FileReadyToParse',
@@ -241,19 +264,20 @@ def _WaitForDiagnoticsToBeReaady( app, filepath, contents, **kwargs ):
   return results
 
 
+@WithRetry
 @SharedYcmd
 def FileReadyToParse_Diagnostics_Simple_test( app ):
   filepath = ProjectPath( 'TestFactory.java' )
   contents = ReadFile( filepath )
 
   # It can take a while for the diagnostics to be ready
-  results = _WaitForDiagnoticsToBeReaady( app, filepath, contents )
+  results = _WaitForDiagnosticsToBeReady( app, filepath, contents )
   print( 'completer response: {0}'.format( pformat( results ) ) )
 
   assert_that( results, DIAG_MATCHERS_PER_FILE[ filepath ] )
 
 
-@IsolatedYcmd
+@IsolatedYcmd()
 def FileReadyToParse_Diagnostics_FileNotOnDisk_test( app ):
   StartJavaCompleterServerInDirectory( app,
                                        PathToTestFile( DEFAULT_PROJECT_DIR ) )
@@ -281,8 +305,8 @@ def FileReadyToParse_Diagnostics_FileNotOnDisk_test( app ):
     'kind': 'ERROR',
     'text': 'Syntax error, insert ";" to complete ClassBodyDeclarations',
     'location': LocationMatcher( filepath, 4, 21 ),
-    'location_extent': RangeMatch( filepath, ( 4, 21 ), ( 4, 25 ) ),
-    'ranges': contains( RangeMatch( filepath, ( 4, 21 ), ( 4, 25 ) ) ),
+    'location_extent': RangeMatcher( filepath, ( 4, 21 ), ( 4, 25 ) ),
+    'ranges': contains( RangeMatcher( filepath, ( 4, 21 ), ( 4, 25 ) ) ),
     'fixit_available': False
   } ) )
 
@@ -310,6 +334,7 @@ def FileReadyToParse_Diagnostics_FileNotOnDisk_test( app ):
   assert_that( results, diag_matcher )
 
 
+@WithRetry
 @SharedYcmd
 def Poll_Diagnostics_ProjectWide_Eclipse_test( app ):
   filepath = TestLauncher
@@ -317,7 +342,7 @@ def Poll_Diagnostics_ProjectWide_Eclipse_test( app ):
 
   # Poll until we receive _all_ the diags asynchronously
   to_see = sorted( iterkeys( DIAG_MATCHERS_PER_FILE ) )
-  seen = dict()
+  seen = {}
 
   try:
     for message in PollForMessages( app,
@@ -337,6 +362,10 @@ def Poll_Diagnostics_ProjectWide_Eclipse_test( app ):
 
       if sorted( iterkeys( seen ) ) == to_see:
         break
+      else:
+        print( 'Seen diagnostics for {0}, still waiting for {1}'.format(
+          json.dumps( sorted( iterkeys( seen ) ), indent=2 ),
+          json.dumps( [ x for x in to_see if x not in seen ], indent=2 ) ) )
 
       # Eventually PollForMessages will throw a timeout exception and we'll fail
       # if we don't see all of the expected diags
@@ -349,36 +378,89 @@ def Poll_Diagnostics_ProjectWide_Eclipse_test( app ):
         json.dumps( sorted( iterkeys( seen ) ), indent=2 ) ) )
 
 
-@IsolatedYcmd
-@patch(
-  'ycmd.completers.language_server.language_server_protocol.UriToFilePath',
-  side_effect = lsp.InvalidUriException )
-def FileReadyToParse_Diagnostics_InvalidURI_test( app, uri_to_filepath, *args ):
+@IsolatedYcmd()
+def Poll_Diagnostics_ChangeFileContents_test( app ):
   StartJavaCompleterServerInDirectory( app,
                                        PathToTestFile( DEFAULT_PROJECT_DIR ) )
 
-  filepath = TestFactory
-  contents = ReadFile( filepath )
+  filepath = youcompleteme_Test
+  old_contents = """package com.youcompleteme;
 
-  # It can take a while for the diagnostics to be ready
-  results = _WaitForDiagnoticsToBeReaady( app, filepath, contents )
-  print( 'Completer response: {0}'.format( json.dumps( results, indent=2 ) ) )
+public class Test {
+  public String test;
+}"""
 
-  uri_to_filepath.assert_called()
+  messages_for_filepath = []
 
-  assert_that( results, has_item(
-    has_entries( {
-      'kind': 'WARNING',
-      'text': 'The value of the field TestFactory.Bar.testString is not used',
-      'location': LocationMatcher( '', 15, 19 ),
-      'location_extent': RangeMatch( '', ( 15, 19 ), ( 15, 29 ) ),
-      'ranges': contains( RangeMatch( '', ( 15, 19 ), ( 15, 29 ) ) ),
-      'fixit_available': False
-    } ),
-  ) )
+  def PollForMessagesInAnotherThread( filepath, contents ):
+    try:
+      for message in PollForMessages( app,
+                                      { 'filepath': filepath,
+                                        'contents': contents } ):
+        if 'filepath' in message and message[ 'filepath' ] == filepath:
+          messages_for_filepath.append( message )
+    except PollForMessagesTimeoutException:
+      pass
+
+  StartThread( PollForMessagesInAnotherThread, filepath, old_contents )
+
+  new_contents = """package com.youcompleteme;
+
+public class Test {
+  public String test;
+  public String test;
+}"""
+
+  event_data = BuildRequest( event_name = 'FileReadyToParse',
+                             contents = new_contents,
+                             filepath = filepath,
+                             filetype = 'java' )
+  app.post_json( '/event_notification', event_data ).json
+
+  expiration = time.time() + 10
+  while True:
+    try:
+      assert_that(
+        messages_for_filepath,
+        has_item( has_entries( {
+          'filepath': filepath,
+          'diagnostics': contains(
+            has_entries( {
+              'kind': 'ERROR',
+              'text': 'Duplicate field Test.test',
+              'location': LocationMatcher( youcompleteme_Test, 4, 17 ),
+              'location_extent': RangeMatcher( youcompleteme_Test,
+                                               ( 4, 17 ),
+                                               ( 4, 21 ) ),
+              'ranges': contains( RangeMatcher( youcompleteme_Test,
+                                                ( 4, 17 ),
+                                                ( 4, 21 ) ) ),
+              'fixit_available': False
+            } ),
+            has_entries( {
+              'kind': 'ERROR',
+              'text': 'Duplicate field Test.test',
+              'location': LocationMatcher( youcompleteme_Test, 5, 17 ),
+              'location_extent': RangeMatcher( youcompleteme_Test,
+                                               ( 5, 17 ),
+                                               ( 5, 21 ) ),
+              'ranges': contains( RangeMatcher( youcompleteme_Test,
+                                                ( 5, 17 ),
+                                                ( 5, 21 ) ) ),
+              'fixit_available': False
+            } )
+          )
+        } ) )
+      )
+      break
+    except AssertionError:
+      if time.time() > expiration:
+        raise
+
+      time.sleep( 0.25 )
 
 
-@IsolatedYcmd
+@IsolatedYcmd()
 def FileReadyToParse_ServerNotReady_test( app ):
   filepath = TestFactory
   contents = ReadFile( filepath )
@@ -415,7 +497,7 @@ def FileReadyToParse_ServerNotReady_test( app ):
     assert_that( results, empty() )
 
 
-@IsolatedYcmd
+@IsolatedYcmd()
 def FileReadyToParse_ChangeFileContents_test( app ):
   filepath = TestFactory
   contents = ReadFile( filepath )
@@ -487,7 +569,7 @@ def FileReadyToParse_ChangeFileContents_test( app ):
   assert_that( result, equal_to( {} ) )
 
 
-@IsolatedYcmd
+@IsolatedYcmd()
 def FileReadyToParse_ChangeFileContentsFileData_test( app ):
   filepath = TestFactory
   contents = ReadFile( filepath )
@@ -502,17 +584,17 @@ def FileReadyToParse_ChangeFileContentsFileData_test( app ):
   StartJavaCompleterServerInDirectory( app, ProjectPath() )
 
   # It can take a while for the diagnostics to be ready
-  results = _WaitForDiagnoticsToBeReaady( app,
+  results = _WaitForDiagnosticsToBeReady( app,
                                           filepath,
                                           contents )
   assert results
 
   # Check that we have diagnostics for the saved file
-  diags = _WaitForDiagnoticsForFile( app,
-                                     filepath,
-                                     contents,
-                                     unsaved_buffer_path,
-                                     lambda d: d )
+  diags = _WaitForDiagnosticsForFile( app,
+                                      filepath,
+                                      contents,
+                                      unsaved_buffer_path,
+                                      lambda d: d )
   assert_that( diags, DIAG_MATCHERS_PER_FILE[ unsaved_buffer_path ] )
 
   # Now update the unsaved file with new contents
@@ -524,11 +606,11 @@ def FileReadyToParse_ChangeFileContentsFileData_test( app ):
   app.post_json( '/event_notification', event_data )
 
   # Check that we have no diagnostics for the dirty file
-  diags = _WaitForDiagnoticsForFile( app,
-                                     filepath,
-                                     contents,
-                                     unsaved_buffer_path,
-                                     lambda d: not d )
+  diags = _WaitForDiagnosticsForFile( app,
+                                      filepath,
+                                      contents,
+                                      unsaved_buffer_path,
+                                      lambda d: not d )
   assert_that( diags, empty() )
 
   # Now send the request again, but don't include the unsaved file. It should be
@@ -540,15 +622,16 @@ def FileReadyToParse_ChangeFileContentsFileData_test( app ):
   app.post_json( '/event_notification', event_data )
 
   # Check that we now have diagnostics for the previously-dirty file
-  diags = _WaitForDiagnoticsForFile( app,
-                                     filepath,
-                                     contents,
-                                     unsaved_buffer_path,
-                                     lambda d: d )
+  diags = _WaitForDiagnosticsForFile( app,
+                                      filepath,
+                                      contents,
+                                      unsaved_buffer_path,
+                                      lambda d: d )
 
   assert_that( diags, DIAG_MATCHERS_PER_FILE[ unsaved_buffer_path ] )
 
 
+@WithRetry
 @SharedYcmd
 def OnBufferUnload_ServerNotRunning_test( app ):
   filepath = TestFactory
@@ -561,10 +644,10 @@ def OnBufferUnload_ServerNotRunning_test( app ):
                                filepath = filepath,
                                filetype = 'java' )
     result = app.post_json( '/event_notification', event_data ).json
-    assert_that( result, equal_to( {}  ) )
+    assert_that( result, equal_to( {} ) )
 
 
-@IsolatedYcmd
+@IsolatedYcmd()
 def PollForMessages_InvalidUri_test( app, *args ):
   StartJavaCompleterServerInDirectory(
     app,
@@ -596,7 +679,7 @@ def PollForMessages_InvalidUri_test( app, *args ):
   assert_that( response, equal_to( True ) )
 
 
-@IsolatedYcmd
+@IsolatedYcmd()
 @patch.object( completer, 'MESSAGE_POLL_TIMEOUT', 2 )
 def PollForMessages_ServerNotRunning_test( app ):
   StartJavaCompleterServerInDirectory(
@@ -622,7 +705,7 @@ def PollForMessages_ServerNotRunning_test( app ):
   assert_that( response, equal_to( False ) )
 
 
-@IsolatedYcmd
+@IsolatedYcmd()
 def PollForMessages_AbortedWhenServerDies_test( app ):
   StartJavaCompleterServerInDirectory(
     app,
@@ -631,20 +714,26 @@ def PollForMessages_AbortedWhenServerDies_test( app ):
   filepath = TestFactory
   contents = ReadFile( filepath )
 
+  state = {
+    'aborted': False
+  }
+
   def AwaitMessages():
-    for tries in range( 0, 5 ):
+    max_tries = 20
+    for tries in range( 0, max_tries ):
       response = app.post_json( '/receive_messages',
                                 BuildRequest(
                                   filetype = 'java',
                                   filepath = filepath,
                                   contents = contents ) ).json
       if response is False:
+        state[ 'aborted' ] = True
         return
 
-    raise AssertionError( 'The poll request was not aborted in 5 tries' )
+    raise AssertionError( 'The poll request was not aborted in {} tries'.format(
+      max_tries ) )
 
-  message_poll_task = threading.Thread( target=AwaitMessages )
-  message_poll_task.start()
+  message_poll_task = StartThread( AwaitMessages )
 
   app.post_json(
     '/run_completer_command',
@@ -655,3 +744,4 @@ def PollForMessages_AbortedWhenServerDies_test( app ):
   )
 
   message_poll_task.join()
+  eq_( state[ 'aborted' ], True )

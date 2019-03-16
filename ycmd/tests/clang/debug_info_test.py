@@ -1,4 +1,4 @@
-# Copyright (C) 2016-2017 ycmd contributors
+# Copyright (C) 2016-2018 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -26,9 +26,9 @@ import os
 from hamcrest import ( assert_that, contains, empty, has_entries, has_entry,
                        instance_of, matches_regexp )
 
-from ycmd.tests.clang import ( IsolatedYcmd, PathToTestFile, SharedYcmd,
-                               TemporaryClangProject )
-from ycmd.tests.test_utils import BuildRequest, TemporaryTestDir
+from ycmd.tests.clang import IsolatedYcmd, PathToTestFile, SharedYcmd
+from ycmd.tests.test_utils import ( BuildRequest, TemporaryTestDir,
+                                    TemporaryClangProject )
 
 
 @SharedYcmd
@@ -49,7 +49,11 @@ def DebugInfo_FlagsWhenExtraConfLoadedAndNoCompilationDatabase_test( app ):
         } ),
         has_entries( {
           'key': 'flags',
-          'value': matches_regexp( "\['-x', 'c\+\+', .*\]" )
+          'value': matches_regexp( "\\[u?'-x', u?'c\\+\\+', .*\\]" )
+        } ),
+        has_entries( {
+          'key': 'translation unit',
+          'value': PathToTestFile( 'basic.cpp' )
         } )
       )
     } ) )
@@ -73,6 +77,10 @@ def DebugInfo_FlagsWhenNoExtraConfAndNoCompilationDatabase_test( app ):
         has_entries( {
           'key': 'flags',
           'value': '[]'
+        } ),
+        has_entries( {
+          'key': 'translation unit',
+          'value': instance_of( str )
         } )
       )
     } ) )
@@ -91,6 +99,10 @@ def DebugInfo_FlagsWhenNoExtraConfAndNoCompilationDatabase_test( app ):
         has_entries( {
           'key': 'flags',
           'value': '[]'
+        } ),
+        has_entries( {
+          'key': 'translation unit',
+          'value': instance_of( str )
         } )
       )
     } ) )
@@ -116,6 +128,10 @@ def DebugInfo_FlagsWhenExtraConfNotLoadedAndNoCompilationDatabase_test(
         has_entries( {
           'key': 'flags',
           'value': '[]'
+        } ),
+        has_entries( {
+          'key': 'translation unit',
+          'value': PathToTestFile( 'basic.cpp' )
         } )
       )
     } ) )
@@ -150,7 +166,12 @@ def DebugInfo_FlagsWhenNoExtraConfAndCompilationDatabaseLoaded_test( app ):
             has_entries( {
               'key': 'flags',
               'value': matches_regexp(
-                  "\['clang\+\+', '-x', 'c\+\+', .*, '-Wall', .*\]" )
+                "\\[u?'clang\\+\\+', u?'-x', u?'c\\+\\+', .*, u?'-Wall', .*\\]"
+              )
+            } ),
+            has_entries( {
+              'key': 'translation unit',
+              'value': os.path.join( tmp_dir, 'test.cc' ),
             } )
           )
         } ) )
@@ -179,7 +200,112 @@ def DebugInfo_FlagsWhenNoExtraConfAndInvalidCompilationDatabase_test( app ):
             has_entries( {
               'key': 'flags',
               'value': '[]'
+            } ),
+            has_entries( {
+              'key': 'translation unit',
+              'value': os.path.join( tmp_dir, 'test.cc' )
             } )
           )
         } ) )
       )
+
+
+@IsolatedYcmd(
+  { 'global_ycm_extra_conf': PathToTestFile( '.ycm_extra_conf.py' ) } )
+def DebugInfo_FlagsWhenGlobalExtraConfAndCompilationDatabaseLoaded_test( app ):
+  with TemporaryTestDir() as tmp_dir:
+    compile_commands = [
+      {
+        'directory': tmp_dir,
+        'command': 'clang++ -I. -I/absolute/path -Wall',
+        'file': os.path.join( tmp_dir, 'test.cc' ),
+      },
+    ]
+    with TemporaryClangProject( tmp_dir, compile_commands ):
+      request_data = BuildRequest(
+        filepath = os.path.join( tmp_dir, 'test.cc' ),
+        filetype = 'cpp' )
+
+      assert_that(
+        app.post_json( '/debug_info', request_data ).json,
+        has_entry( 'completer', has_entries( {
+          'name': 'C-family',
+          'servers': empty(),
+          'items': contains(
+            has_entries( {
+              'key': 'compilation database path',
+              'value': instance_of( str )
+            } ),
+            has_entries( {
+              'key': 'flags',
+              'value': matches_regexp(
+                "\\[u?'clang\\+\\+', u?'-x', u?'c\\+\\+', .*, u?'-Wall', .*\\]"
+              )
+            } ),
+            has_entries( {
+              'key': 'translation unit',
+              'value': os.path.join( tmp_dir, 'test.cc' ),
+            } )
+          )
+        } ) )
+      )
+
+
+@IsolatedYcmd(
+  { 'global_ycm_extra_conf': PathToTestFile( '.ycm_extra_conf.py' ) } )
+def DebugInfo_FlagsWhenGlobalExtraConfAndNoCompilationDatabase_test( app ):
+  request_data = BuildRequest( filepath = PathToTestFile( 'basic.cpp' ),
+                               filetype = 'cpp' )
+  assert_that(
+    app.post_json( '/debug_info', request_data ).json,
+    has_entry( 'completer', has_entries( {
+      'name': 'C-family',
+      'servers': empty(),
+      'items': contains(
+        has_entries( {
+          'key': 'compilation database path',
+          'value': 'None'
+        } ),
+        has_entries( {
+          'key': 'flags',
+          'value': matches_regexp( "\\[u?'-x', u?'c\\+\\+', .*\\]" )
+        } ),
+        has_entries( {
+          'key': 'translation unit',
+          'value': PathToTestFile( 'basic.cpp' )
+        } )
+      )
+    } ) )
+  )
+
+
+@SharedYcmd
+def DebugInfo_Unity_test( app ):
+  # Main TU
+  app.post_json( '/load_extra_conf_file',
+                 { 'filepath': PathToTestFile( '.ycm_extra_conf.py' ) } )
+
+  for filename in [ 'unity.cc', 'unity.h', 'unitya.cc' ]:
+    request_data = BuildRequest( filepath = PathToTestFile( filename ),
+                                 filetype = 'cpp' )
+    assert_that(
+      app.post_json( '/debug_info', request_data ).json,
+      has_entry( 'completer', has_entries( {
+        'name': 'C-family',
+        'servers': empty(),
+        'items': contains(
+          has_entries( {
+            'key': 'compilation database path',
+            'value': 'None'
+          } ),
+          has_entries( {
+            'key': 'flags',
+            'value': matches_regexp( "\\[u?'-x', u?'c\\+\\+', .*\\]" )
+          } ),
+          has_entries( {
+            'key': 'translation unit',
+            'value': PathToTestFile( 'unity.cc' )
+          } )
+        )
+      } ) )
+    )

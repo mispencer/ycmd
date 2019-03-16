@@ -3,27 +3,22 @@ environment:
   USE_CLANG_COMPLETER: true
   COVERAGE: true
   matrix:
-  # We dropped MSVC 11 support because it lacks features from C++11 and C99.
-  # We dropped MSVC 13 support because it lacks .NET 4.6 on that image
-  #- APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2013
-  #  arch: 64
-  #  python: 36
   - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2015
     arch: 64
-    python: 36
+    python: 37
   - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
     arch: 32
-    python: 36
+    python: 37
   # We only test Python 2.7 with MSVC 15 on 64-bit.
   - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
     arch: 64
     python: 27
   - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
     arch: 64
-    python: 36
+    python: 37
   - APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
     arch: 64
-    python: 36
+    python: 37
     YCM_BENCHMARK: true
     COVERAGE: false
 install:
@@ -42,3 +37,4 @@ cache:
   - '%APPVEYOR_BUILD_FOLDER%\third_party\racerd\target'  # Racerd compilation
      # jdt.ls download
   - '%APPVEYOR_BUILD_FOLDER%\third_party\eclipse.jdt.ls\target\cache'
+  - '%APPVEYOR_BUILD_FOLDER%\third_party\clangd\cache'

@@ -33,19 +33,11 @@ pip install -r test_requirements.txt
 if %errorlevel% neq 0 exit /b %errorlevel%
 pip install codecov
 if %errorlevel% neq 0 exit /b %errorlevel%
+del get-pip.py
 
 :: Enable coverage for Python subprocesses. See:
 :: http://coverage.readthedocs.io/en/latest/subprocess.html
 python -c "with open('%python_path%\Lib\site-packages\sitecustomize.py', 'w') as f: f.write('import coverage\ncoverage.process_startup()')"
-
-::
-:: Typescript configuration
-::
-
-:: Since npm executable is a batch file, we need to prefix it with a call
-:: statement. See https://github.com/npm/npm/issues/2938
-call npm install -g typescript
-if %errorlevel% neq 0 exit /b %errorlevel%
 
 ::
 :: Rust configuration

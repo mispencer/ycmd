@@ -18,7 +18,6 @@
 #include "TranslationUnitStore.h"
 #include "TranslationUnit.h"
 #include "Utils.h"
-#include "exceptions.h"
 
 #include <functional>
 
@@ -32,20 +31,12 @@ namespace YouCompleteMe {
 namespace {
 
 std::size_t HashForFlags( const std::vector< std::string > &flags ) {
-  /*
-   * The way boost::hash implements hash< std::vector<T> > goes after the
-   * described way in "Library Extension Technical Report - Issue List"
-   * section 6.18. This function's body is taken straight (copy-pasted)
-   * from the TR to replicate boost's behaviour.
-   *
-   * When (if) it ends up in the STL this whole function could be
-   * replaced with:
-   *
-   * return std::hash< std::vector< std::string > >()( flags );
-   */
+  // The algorithm has been taken straight from a TR1:
+  // "Library Extension Technical Report - Issue List" section 6.18.
+  // This is also the way Boost implements it.
   size_t seed = 0;
-  for ( auto flag : flags ) {
-    seed ^= std::hash< std::string >()( flag ) + ( seed<<6 ) + ( seed>>2 );
+  for ( const auto &flag : flags )  {
+    seed ^= std::hash< std::string >()( flag ) + ( seed << 6 ) + ( seed >> 2 );
   }
   return seed;
 }
@@ -106,9 +97,9 @@ shared_ptr< TranslationUnit > TranslationUnitStore::GetOrCreate(
                                            unsaved_files,
                                            flags,
                                            clang_index_ );
-  } catch ( ClangParseError & ) {
+  } catch ( const ClangParseError & ) {
     Remove( filename );
-    return unit;
+    throw;
   }
 
   {

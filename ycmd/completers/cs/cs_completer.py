@@ -1,6 +1,4 @@
-# Copyright (C) 2011-2012 Chiel ten Brinke <ctenbrinke@gmail.com>
-#                         Google Inc.
-#               2017      ycmd contributors
+# Copyright (C) 2011-2018 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -26,20 +24,17 @@ from builtins import *  # noqa
 
 from collections import defaultdict
 from future.utils import itervalues, PY2
-import logging
 import os
 import errno
 import time
-import re
 import requests
 import threading
 from subprocess import PIPE
 
 from ycmd.completers.completer import Completer
-from ycmd.completers.completer_utils import GetFileContents
+from ycmd.completers.completer_utils import GetFileLines
 from ycmd.completers.cs import solutiondetection
-from ycmd.utils import ( ForceSemanticCompletion, CodepointOffsetToByteOffset,
-                         urljoin )
+from ycmd.utils import CodepointOffsetToByteOffset, LOGGER, re, urljoin
 from ycmd import responses
 from ycmd import utils
 
@@ -69,12 +64,9 @@ class CsharpCompleter( Completer ):
 
   def __init__( self, user_options ):
     super( CsharpCompleter, self ).__init__( user_options )
-    self._logger = logging.getLogger( __name__ )
     self._solution_for_file = {}
     self._completer_per_solution = {}
     self._diagnostic_store = None
-    self._max_diagnostics_to_display = user_options[
-      'max_diagnostics_to_display' ]
     self._solution_state_lock = threading.Lock()
     self._omnisharp_path = PATH_TO_ROSLYN_OMNISHARP_BINARY
 
@@ -124,13 +116,8 @@ class CsharpCompleter( Completer ):
       return super( CsharpCompleter, self ).ShouldUseNowInner( request_data )
 
 
-  def CompletionType( self, request_data ):
-    return ForceSemanticCompletion( request_data )
-
-
   def ComputeCandidatesInner( self, request_data ):
     solutioncompleter = self._GetSolutionCompleter( request_data )
-    completion_type = self.CompletionType( request_data )
     return [ responses.BuildCompletionData(
                 completion[ 'CompletionText' ],
                 completion[ 'DisplayText' ],
@@ -140,8 +127,7 @@ class CsharpCompleter( Completer ):
                 { "required_namespace_import" :
                    completion[ 'RequiredNamespaceImport' ] } )
              for completion
-             in solutioncompleter._GetCompletions( request_data,
-                                                   completion_type ) ]
+             in solutioncompleter._GetCompletions( request_data ) ]
 
 
   def FilterAndSortCandidates( self, candidates, query ):
@@ -248,8 +234,9 @@ class CsharpCompleter( Completer ):
 
     self._diagnostic_store = DiagnosticsToDiagStructure( diagnostics )
 
-    return [ responses.BuildDiagnosticData( x ) for x in
-             diagnostics[ : self._max_diagnostics_to_display ] ]
+    return responses.BuildDiagnosticResponse( diagnostics,
+                                              request_data[ 'filepath' ],
+                                              self.max_diagnostics_to_display )
 
 
   def _QuickFixToDiagnostic( self, request_data, quick_fix ):
@@ -267,7 +254,7 @@ class CsharpCompleter( Completer ):
     if not location_end:
       location_end = location
     location_extent = responses.Range( location, location_end )
-    return responses.Diagnostic( list(),
+    return responses.Diagnostic( [],
                                  location,
                                  location_extent,
                                  quick_fix[ 'Text' ],
@@ -378,7 +365,6 @@ class CsharpCompleter( Completer ):
 class CsharpSolutionCompleter( object ):
   def __init__( self, omnisharp_path, solution_path, keep_logfiles,
                 desired_omnisharp_port ):
-    self._logger = logging.getLogger( __name__ )
     self._omnisharp_path = omnisharp_path
     self._solution_path = solution_path
     self._keep_logfiles = keep_logfiles
@@ -406,12 +392,11 @@ class CsharpSolutionCompleter( object ):
       if self._ServerIsRunning():
         return
 
-      self._logger.info( 'Starting OmniSharp server' )
+      LOGGER.info( 'Starting OmniSharp server' )
 
       path_to_solutionfile = _ConvertFilenameForCygwin( self._solution_path,
                                                         True )
-      self._logger.info(
-          u'Loading solution file {0}'.format( path_to_solutionfile ) )
+      LOGGER.info( 'Loading solution file %s', path_to_solutionfile )
 
       self._ChooseOmnisharpPort()
 
@@ -432,7 +417,7 @@ class CsharpSolutionCompleter( object ):
            and self._omnisharp_path.endswith( '.exe' ) ):
         command.insert( 0, 'mono' )
 
-      self._logger.info( 'Starting OmniSharp server with: ' + str( command ) )
+      LOGGER.info( 'Starting OmniSharp server with: ' + str( command ) )
 
       solutionfile = os.path.basename( self._solution_path )
       self._filename_stdout = utils.CreateLogfile(
@@ -450,24 +435,24 @@ class CsharpSolutionCompleter( object ):
               command, stdout = fstdout, stderr = fstderr,
               shell = shell_required )
 
-      self._logger.info( 'Starting OmniSharp server' )
+      LOGGER.info( 'Starting OmniSharp server' )
 
 
   def _StopServer( self ):
     """ Stop the OmniSharp server using a lock. """
     with self._server_state_lock:
       if self._ServerIsRunning():
-        self._logger.info( 'Stopping OmniSharp server with PID {0}'.format(
-                               self._omnisharp_phandle.pid ) )
+        LOGGER.info( 'Stopping OmniSharp server with PID %s',
+                     self._omnisharp_phandle.pid )
         try:
           self._TryToStopServer()
           self._ForceStopServer()
           self._GetResponse( '/stopserver' )
           utils.WaitUntilProcessIsTerminated( self._omnisharp_phandle,
                                               timeout = 5 )
-          self._logger.info( 'OmniSharp server stopped' )
+          LOGGER.info( 'OmniSharp server stopped' )
         except Exception:
-          self._logger.exception( 'Error while stopping OmniSharp server' )
+          LOGGER.exception( 'Error while stopping OmniSharp server' )
 
       self._CleanUp()
 
@@ -488,7 +473,7 @@ class CsharpSolutionCompleter( object ):
     # Kill it if it's still up
     phandle = self._omnisharp_phandle
     if phandle is not None:
-      self._logger.info( 'Killing OmniSharp server' )
+      LOGGER.info( 'Killing OmniSharp server' )
       for stream in [ phandle.stderr, phandle.stdout ]:
         if stream is not None:
           stream.close()
@@ -522,22 +507,18 @@ class CsharpSolutionCompleter( object ):
 
   def _ReloadSolution( self ):
     """ Reloads the solutions in the OmniSharp server """
-    self._logger.info( 'Reloading Solution in OmniSharp server' )
+    LOGGER.info( 'Reloading Solution in OmniSharp server' )
     try:
       return self._GetResponse( '/reloadsolution' )
     except ValueError:
       return False
 
 
-  def CompletionType( self, request_data ):
-    return ForceSemanticCompletion( request_data )
-
-
-  def _GetCompletions( self, request_data, completion_type ):
+  def _GetCompletions( self, request_data ):
     """ Ask server for completions """
     parameters = self._DefaultParameters( request_data )
-    parameters[ 'WantImportableTypes' ] = completion_type
-    parameters[ 'ForceSemanticCompletion' ] = completion_type
+    parameters[ 'WantImportableTypes' ] = request_data[ 'force_semantic' ]
+    parameters[ 'ForceSemanticCompletion' ] = request_data[ 'force_semantic' ]
     parameters[ 'WantDocumentationForEveryCompletionResult' ] = True
     completions = self._GetResponse( '/autocomplete', parameters )
     return completions if completions is not None else []
@@ -685,21 +666,21 @@ class CsharpSolutionCompleter( object ):
   def _GetResponse( self, handler, parameters = {}, timeout = None ):
     """ Handle communication with server """
     target = urljoin( self._ServerLocation(), handler )
-    self._logger.info( u'Sending request' )
+    LOGGER.info( u'Sending request' )
     response = requests.post( target,
                               json = parameters,
                               timeout = timeout )
-    self._logger.info( u'Received response request' )
+    LOGGER.info( u'Received response request' )
     return response.json()
 
 
   def _ChooseOmnisharpPort( self ):
     if not self._omnisharp_port:
-        if self._desired_omnisharp_port:
-            self._omnisharp_port = int( self._desired_omnisharp_port )
-        else:
-            self._omnisharp_port = utils.GetUnusedLocalhostPort()
-    self._logger.info( u'using port {0}'.format( self._omnisharp_port ) )
+      if self._desired_omnisharp_port:
+        self._omnisharp_port = int( self._desired_omnisharp_port )
+      else:
+        self._omnisharp_port = utils.GetUnusedLocalhostPort()
+    LOGGER.info( 'using port %s', self._omnisharp_port )
 
 
 def _CompleteIsFromImport( candidate ):
@@ -788,7 +769,7 @@ def _BuildLocation( request_data, filename, line_num, column_num ):
   # column is 1 in that case.
   if column_num <= 0:
     column_num = 1
-  contents = utils.SplitLines( GetFileContents( request_data, filename ) )
+  contents = GetFileLines( request_data, filename )
   line_value = contents[ line_num - 1 ]
   return responses.Location(
       line_num,

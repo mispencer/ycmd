@@ -1,6 +1,6 @@
 # coding: utf-8
 #
-# Copyright (C) 2015 ycmd contributors
+# Copyright (C) 2015-2018 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -26,24 +26,18 @@ from builtins import *  # noqa
 
 from hamcrest import ( assert_that, calling, empty, greater_than, has_item,
                        has_items, has_entries, raises )
-from nose import SkipTest
 from nose.tools import eq_
 from webtest import AppError
 
 from ycmd.tests.cs import PathToTestFile, SharedYcmd, WrapOmniSharpServer
-from ycmd.tests.test_utils import ( BuildRequest, CompletionEntryMatcher )
+from ycmd.tests.test_utils import BuildRequest, CompletionEntryMatcher
 from ycmd.utils import ReadFile
 
 
-def GetCompletions_Basic_test():
-  yield _GetCompletions_Basic_test, True
-  yield _GetCompletions_Basic_test, False
-
-
 @SharedYcmd
-def _GetCompletions_Basic_test( app, use_roslyn ):
+def GetCompletions_Basic_test( app ):
   filepath = PathToTestFile( 'testy', 'Program.cs' )
-  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
 
     completion_data = BuildRequest( filepath = filepath,
@@ -58,16 +52,10 @@ def _GetCompletions_Basic_test( app, use_roslyn ):
     eq_( 12, response_data[ 'completion_start_column' ] )
 
 
-def GetCompletions_Unicode_test():
-  yield _GetCompletions_Unicode_test, True
-  yield _GetCompletions_Unicode_test, False
-
-
 @SharedYcmd
-def _GetCompletions_Unicode_test( app, use_roslyn ):
-  raise SkipTest( "Unicode is not working (yet) for both" )
+def GetCompletions_Unicode_test( app ):
   filepath = PathToTestFile( 'testy', 'Unicode.cs' )
-  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
 
     completion_data = BuildRequest( filepath = filepath,
@@ -76,10 +64,9 @@ def _GetCompletions_Unicode_test( app, use_roslyn ):
                                     line_num = 43,
                                     column_num = 26 )
     response_data = app.post_json( '/completions', completion_data ).json
-    method_completion = 'DoATest' if use_roslyn else 'DoATest()'
     assert_that( response_data[ 'completions' ],
                  has_items(
-                   CompletionEntryMatcher( method_completion ),
+                   CompletionEntryMatcher( 'DoATest()' ),
                    CompletionEntryMatcher( 'an_int' ),
                    CompletionEntryMatcher( 'a_unicøde' ),
                    CompletionEntryMatcher( 'øøø' ) ) )
@@ -87,26 +74,22 @@ def _GetCompletions_Unicode_test( app, use_roslyn ):
     eq_( 26, response_data[ 'completion_start_column' ] )
 
 
-def GetCompletions_MultipleSolution_test():
-  yield _GetCompletions_MultipleSolution_test, True
-  yield _GetCompletions_MultipleSolution_test, False
-
-
 @SharedYcmd
-def _GetCompletions_MultipleSolution_test( app, use_roslyn ):
+def GetCompletions_MultipleSolution_test( app ):
   filepaths = [ PathToTestFile( 'testy', 'Program.cs' ),
                 PathToTestFile( 'testy-multiple-solutions',
                                 'solution-named-like-folder',
                                 'testy',
                                 'Program.cs' ) ]
-  for filepath in filepaths:
-    with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  lines = [ 10, 9 ]
+  for filepath, line in zip( filepaths, lines ):
+    with WrapOmniSharpServer( app, filepath ):
       contents = ReadFile( filepath )
 
       completion_data = BuildRequest( filepath = filepath,
                                       filetype = 'cs',
                                       contents = contents,
-                                      line_num = 10,
+                                      line_num = line,
                                       column_num = 12 )
       response_data = app.post_json( '/completions',
                                      completion_data ).json
@@ -116,15 +99,10 @@ def _GetCompletions_MultipleSolution_test( app, use_roslyn ):
       eq_( 12, response_data[ 'completion_start_column' ] )
 
 
-def GetCompletions_PathWithSpace_test():
-  yield _GetCompletions_PathWithSpace_test, True
-  yield _GetCompletions_PathWithSpace_test, False
-
-
 @SharedYcmd
-def _GetCompletions_PathWithSpace_test( app, use_roslyn ):
+def GetCompletions_PathWithSpace_test( app ):
   filepath = PathToTestFile( u'неприличное слово', 'Program.cs' )
-  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
 
     completion_data = BuildRequest( filepath = filepath,
@@ -139,16 +117,10 @@ def _GetCompletions_PathWithSpace_test( app, use_roslyn ):
     eq_( 12, response_data[ 'completion_start_column' ] )
 
 
-def GetCompletions_HasBothImportsAndNonImport_test():
-  # Roslyn doesn't have this feature
-  # yield _GetCompletions_HasBothImportsAndNonImport_test, True
-  yield _GetCompletions_HasBothImportsAndNonImport_test, False
-
-
 @SharedYcmd
-def _GetCompletions_HasBothImportsAndNonImport_test( app, use_roslyn ):
+def GetCompletions_HasBothImportsAndNonImport_test( app ):
   filepath = PathToTestFile( 'testy', 'ImportTest.cs' )
-  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
 
     completion_data = BuildRequest( filepath = filepath,
@@ -167,16 +139,10 @@ def _GetCompletions_HasBothImportsAndNonImport_test( app, use_roslyn ):
     )
 
 
-def GetCompletions_ImportsOrderedAfter_test():
-  # Roslyn doesn't have this feature
-  # yield _GetCompletions_ImportsOrderedAfter_test, True
-  yield _GetCompletions_ImportsOrderedAfter_test, False
-
-
 @SharedYcmd
-def _GetCompletions_ImportsOrderedAfter_test( app, use_roslyn ):
+def GetCompletions_ImportsOrderedAfter_test( app ):
   filepath = PathToTestFile( 'testy', 'ImportTest.cs' )
-  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
 
     completion_data = BuildRequest( filepath = filepath,
@@ -203,16 +169,10 @@ def _GetCompletions_ImportsOrderedAfter_test( app, use_roslyn ):
     assert_that( min_import_index, greater_than( max_nonimport_index ) ),
 
 
-def GetCompletions_ForcedReturnsResults_test():
-  # Roslyn doesn't have this feature
-  # yield _GetCompletions_ForcedReturnsResults_test, True
-  yield _GetCompletions_ForcedReturnsResults_test, False
-
-
 @SharedYcmd
-def _GetCompletions_ForcedReturnsResults_test( app, use_roslyn ):
+def GetCompletions_ForcedReturnsResults_test( app ):
   filepath = PathToTestFile( 'testy', 'ContinuousTest.cs' )
-  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
 
     completion_data = BuildRequest( filepath = filepath,
@@ -229,16 +189,10 @@ def _GetCompletions_ForcedReturnsResults_test( app, use_roslyn ):
                             CompletionEntryMatcher( 'StringBuilder' ) ) )
 
 
-def GetCompletions_NonForcedReturnsNoResults_test():
-  # Roslyn doesn't have this feature
-  # yield _GetCompletions_NonForcedReturnsNoResults_test, True
-  yield _GetCompletions_NonForcedReturnsNoResults_test, False
-
-
 @SharedYcmd
-def _GetCompletions_NonForcedReturnsNoResults_test( app, use_roslyn ):
+def GetCompletions_NonForcedReturnsNoResults_test( app ):
   filepath = PathToTestFile( 'testy', 'ContinuousTest.cs' )
-  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
     event_data = BuildRequest( filepath = filepath,
                                filetype = 'cs',
@@ -267,16 +221,10 @@ def _GetCompletions_NonForcedReturnsNoResults_test( app, use_roslyn ):
     } ) )
 
 
-def GetCompletions_ForcedDividesCache_test():
-  # Roslyn doesn't have this feature
-  # yield _GetCompletions_ForcedDividesCache_test, True
-  yield _GetCompletions_ForcedDividesCache_test, False
-
-
 @SharedYcmd
-def _GetCompletions_ForcedDividesCache_test( app, use_roslyn ):
+def GetCompletions_ForcedDividesCache_test( app ):
   filepath = PathToTestFile( 'testy', 'ContinuousTest.cs' )
-  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
     event_data = BuildRequest( filepath = filepath,
                                filetype = 'cs',
@@ -317,15 +265,10 @@ def _GetCompletions_ForcedDividesCache_test( app, use_roslyn ):
     } ) )
 
 
-def GetCompletions_ReloadSolution_Basic_test():
-  yield _GetCompletions_ReloadSolution_Basic_test, True
-  yield _GetCompletions_ReloadSolution_Basic_test, False
-
-
 @SharedYcmd
-def _GetCompletions_ReloadSolution_Basic_test( app, use_roslyn ):
+def GetCompletions_ReloadSolution_Basic_test( app ):
   filepath = PathToTestFile( 'testy', 'Program.cs' )
-  with WrapOmniSharpServer( app, filepath, use_roslyn ):
+  with WrapOmniSharpServer( app, filepath ):
     result = app.post_json(
       '/run_completer_command',
       BuildRequest( completer_target = 'filetype_default',
@@ -333,24 +276,18 @@ def _GetCompletions_ReloadSolution_Basic_test( app, use_roslyn ):
                     filepath = filepath,
                     filetype = 'cs' ) ).json
 
-    eq_( result, not use_roslyn )
-
-
-def GetCompletions_ReloadSolution_MultipleSolution_test():
-  # Roslyn doesn't have this endpoint (yet)
-  # yield _GetCompletions_ReloadSolution_MultipleSolution_test, True
-  yield _GetCompletions_ReloadSolution_MultipleSolution_test, False
+    eq_( result, True )
 
 
 @SharedYcmd
-def _GetCompletions_ReloadSolution_MultipleSolution_test( app, use_roslyn ):
+def GetCompletions_ReloadSolution_MultipleSolution_test( app ):
   filepaths = [ PathToTestFile( 'testy', 'Program.cs' ),
                 PathToTestFile( 'testy-multiple-solutions',
                                 'solution-named-like-folder',
                                 'testy',
                                 'Program.cs' ) ]
   for filepath in filepaths:
-    with WrapOmniSharpServer( app, filepath, use_roslyn ):
+    with WrapOmniSharpServer( app, filepath ):
       result = app.post_json(
         '/run_completer_command',
         BuildRequest( completer_target = 'filetype_default',
@@ -376,16 +313,11 @@ def SolutionSelectCheck( app, sourcefile, reference_solution,
                                         filetype = 'cs' ) ).json
 
   # Now that cleanup is done, verify solution file
-  eq_( reference_solution, result)
-
-
-def GetCompletions_UsesSubfolderHint_test():
-  yield _GetCompletions_UsesSubfolderHint_test, True
-  yield _GetCompletions_UsesSubfolderHint_test, False
+  eq_( reference_solution, result )
 
 
 @SharedYcmd
-def _GetCompletions_UsesSubfolderHint_test( app, use_roslyn ):
+def GetCompletions_UsesSubfolderHint_test( app ):
   SolutionSelectCheck( app,
                        PathToTestFile( 'testy-multiple-solutions',
                                        'solution-named-like-folder',
@@ -395,13 +327,8 @@ def _GetCompletions_UsesSubfolderHint_test( app, use_roslyn ):
                                        'testy.sln' ) )
 
 
-def GetCompletions_UsesSuperfolderHint_test():
-  yield _GetCompletions_UsesSuperfolderHint_test, True
-  yield _GetCompletions_UsesSuperfolderHint_test, False
-
-
 @SharedYcmd
-def _GetCompletions_UsesSuperfolderHint_test( app, use_roslyn ):
+def GetCompletions_UsesSuperfolderHint_test( app ):
   SolutionSelectCheck( app,
                        PathToTestFile( 'testy-multiple-solutions',
                                        'solution-named-like-folder',
@@ -411,13 +338,8 @@ def _GetCompletions_UsesSuperfolderHint_test( app, use_roslyn ):
                                        'solution-named-like-folder.sln' ) )
 
 
-def GetCompletions_ExtraConfStoreAbsolute_test():
-  yield _GetCompletions_ExtraConfStoreAbsolute_test, True
-  yield _GetCompletions_ExtraConfStoreAbsolute_test, False
-
-
 @SharedYcmd
-def _GetCompletions_ExtraConfStoreAbsolute_test( app, use_roslyn ):
+def GetCompletions_ExtraConfStoreAbsolute_test( app ):
   SolutionSelectCheck( app,
                        PathToTestFile( 'testy-multiple-solutions',
                                        'solution-not-named-like-folder',
@@ -432,13 +354,8 @@ def _GetCompletions_ExtraConfStoreAbsolute_test( app, use_roslyn ):
                                        '.ycm_extra_conf.py' ) )
 
 
-def GetCompletions_ExtraConfStoreRelative_test():
-  yield _GetCompletions_ExtraConfStoreRelative_test, True
-  yield _GetCompletions_ExtraConfStoreRelative_test, False
-
-
 @SharedYcmd
-def _GetCompletions_ExtraConfStoreRelative_test( app, use_roslyn ):
+def GetCompletions_ExtraConfStoreRelative_test( app ):
   SolutionSelectCheck( app,
                        PathToTestFile( 'testy-multiple-solutions',
                                        'solution-not-named-like-folder',
@@ -454,13 +371,8 @@ def _GetCompletions_ExtraConfStoreRelative_test( app, use_roslyn ):
                                        '.ycm_extra_conf.py' ) )
 
 
-def GetCompletions_ExtraConfStoreNonexisting_test():
-  yield _GetCompletions_ExtraConfStoreNonexisting_test, True
-  yield _GetCompletions_ExtraConfStoreNonexisting_test, False
-
-
 @SharedYcmd
-def _GetCompletions_ExtraConfStoreNonexisting_test( app, use_roslyn ):
+def GetCompletions_ExtraConfStoreNonexisting_test( app ):
   SolutionSelectCheck( app,
                        PathToTestFile( 'testy-multiple-solutions',
                                        'solution-not-named-like-folder',
@@ -476,14 +388,8 @@ def _GetCompletions_ExtraConfStoreNonexisting_test( app, use_roslyn ):
                                        'testy', '.ycm_extra_conf.py' ) )
 
 
-def GetCompletions_DoesntStartWithAmbiguousMultipleSolutions_test():
-  yield _GetCompletions_DoesntStartWithAmbiguousMultipleSolutions_test, True
-  yield _GetCompletions_DoesntStartWithAmbiguousMultipleSolutions_test, False
-
-
 @SharedYcmd
-def _GetCompletions_DoesntStartWithAmbiguousMultipleSolutions_test( app,
-                                                                use_roslyn ):
+def GetCompletions_DoesntStartWithAmbiguousMultipleSolutions_test( app ):
   filepath = PathToTestFile( 'testy-multiple-solutions',
                              'solution-not-named-like-folder',
                              'testy', 'Program.cs' )

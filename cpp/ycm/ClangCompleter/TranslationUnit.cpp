@@ -15,14 +15,15 @@
 // You should have received a copy of the GNU General Public License
 // along with ycmd.  If not, see <http://www.gnu.org/licenses/>.
 
-#include "TranslationUnit.h"
-#include "CompletionData.h"
-#include "exceptions.h"
 #include "ClangUtils.h"
 #include "ClangHelpers.h"
+#include "CompletionData.h"
+#include "TranslationUnit.h"
+#include "Utils.h"
 
-#include <cstdlib>
 #include <algorithm>
+#include <boost/filesystem.hpp>
+#include <cstdlib>
 #include <memory>
 
 using std::unique_lock;
@@ -52,14 +53,16 @@ unsigned ReparseOptions( CXTranslationUnit translationUnit ) {
 
 unsigned CompletionOptions() {
   return clang_defaultCodeCompleteOptions() |
-         CXCodeComplete_IncludeBriefComments;
+         CXCodeComplete_IncludeBriefComments |
+         CXCodeComplete_IncludeCompletionsWithFixIts;
 }
 
 void EnsureCompilerNamePresent( std::vector< const char * > &flags ) {
   bool no_compiler_name_set = !flags.empty() && flags.front()[ 0 ] == '-';
 
-  if ( flags.empty() || no_compiler_name_set )
+  if ( flags.empty() || no_compiler_name_set ) {
     flags.insert( flags.begin(), "clang" );
+  }
 }
 
 }  // unnamed namespace
@@ -68,8 +71,7 @@ using CodeCompleteResultsWrap =
   shared_ptr< remove_pointer< CXCodeCompleteResults >::type >;
 
 TranslationUnit::TranslationUnit()
-  : filename_( "" ),
-    clang_translation_unit_( nullptr ) {
+  : clang_translation_unit_( nullptr ) {
 }
 
 TranslationUnit::TranslationUnit(
@@ -77,8 +79,7 @@ TranslationUnit::TranslationUnit(
   const std::vector< UnsavedFile > &unsaved_files,
   const std::vector< std::string > &flags,
   CXIndex clang_index )
-  : filename_( filename ),
-    clang_translation_unit_( nullptr ) {
+  : clang_translation_unit_( nullptr ) {
   std::vector< const char * > pointer_flags;
   pointer_flags.reserve( flags.size() );
 
@@ -90,22 +91,22 @@ TranslationUnit::TranslationUnit(
 
   std::vector< CXUnsavedFile > cxunsaved_files =
     ToCXUnsavedFiles( unsaved_files );
-  const CXUnsavedFile *unsaved = cxunsaved_files.size() > 0
-                                 ? &cxunsaved_files[ 0 ] : nullptr;
+  const CXUnsavedFile *unsaved = cxunsaved_files.empty()
+                                 ? nullptr : &cxunsaved_files[ 0 ];
 
   // Actually parse the translation unit.
-  CXErrorCode result = clang_parseTranslationUnit2FullArgv(
-                         clang_index,
-                         filename.c_str(),
-                         &pointer_flags[ 0 ],
-                         pointer_flags.size(),
-                         const_cast<CXUnsavedFile *>( unsaved ),
-                         cxunsaved_files.size(),
-                         EditingOptions(),
-                         &clang_translation_unit_ );
-
-  if ( result != CXError_Success )
-    throw( ClangParseError() );
+  CXErrorCode failure = clang_parseTranslationUnit2FullArgv(
+                          clang_index,
+                          filename.c_str(),
+                          &pointer_flags[ 0 ],
+                          pointer_flags.size(),
+                          const_cast<CXUnsavedFile *>( unsaved ),
+                          cxunsaved_files.size(),
+                          EditingOptions(),
+                          &clang_translation_unit_ );
+  if ( failure != CXError_Success ) {
+    throw ClangParseError( failure );
+  }
 }
 
 
@@ -126,8 +127,9 @@ void TranslationUnit::Destroy() {
 bool TranslationUnit::IsCurrentlyUpdating() const {
   // We return true when the TU is invalid; an invalid TU also acts a sentinel,
   // preventing other threads from trying to use it.
-  if ( !clang_translation_unit_ )
+  if ( !clang_translation_unit_ ) {
     return true;
+  }
 
   unique_lock< mutex > lock( clang_access_mutex_, try_to_lock_t() );
   return !lock.owns_lock();
@@ -147,18 +149,20 @@ std::vector< Diagnostic > TranslationUnit::Reparse(
 
 
 std::vector< CompletionData > TranslationUnit::CandidatesForLocation(
+  const std::string &filename,
   int line,
   int column,
   const std::vector< UnsavedFile > &unsaved_files ) {
   unique_lock< mutex > lock( clang_access_mutex_ );
 
-  if ( !clang_translation_unit_ )
+  if ( !clang_translation_unit_ ) {
     return std::vector< CompletionData >();
+  }
 
   std::vector< CXUnsavedFile > cxunsaved_files =
     ToCXUnsavedFiles( unsaved_files );
-  const CXUnsavedFile *unsaved = cxunsaved_files.size() > 0
-                                 ? &cxunsaved_files[ 0 ] : nullptr;
+  const CXUnsavedFile *unsaved = cxunsaved_files.empty()
+                                 ? nullptr : &cxunsaved_files[ 0 ];
 
   // codeCompleteAt reparses the TU if the underlying source file has changed on
   // disk since the last time the TU was updated and there are no unsaved files.
@@ -172,7 +176,7 @@ std::vector< CompletionData > TranslationUnit::CandidatesForLocation(
 
   CodeCompleteResultsWrap results(
     clang_codeCompleteAt( clang_translation_unit_,
-                          filename_.c_str(),
+                          filename.c_str(),
                           line,
                           column,
                           const_cast<CXUnsavedFile *>( unsaved ),
@@ -185,89 +189,166 @@ std::vector< CompletionData > TranslationUnit::CandidatesForLocation(
   return candidates;
 }
 
-Location TranslationUnit::GetDeclarationLocation(
-  int line,
-  int column,
-  const std::vector< UnsavedFile > &unsaved_files,
-  bool reparse ) {
-  if ( reparse )
-    Reparse( unsaved_files );
-
-  unique_lock< mutex > lock( clang_access_mutex_ );
-
-  if ( !clang_translation_unit_ )
-    return Location();
-
-  CXCursor cursor = GetCursor( line, column );
-
-  if ( !CursorIsValid( cursor ) )
-    return Location();
-
+Location TranslationUnit::GetDeclarationLocationForCursor( CXCursor cursor ) {
   CXCursor referenced_cursor = clang_getCursorReferenced( cursor );
 
-  if ( !CursorIsValid( referenced_cursor ) )
+  if ( !CursorIsValid( referenced_cursor ) ) {
     return Location();
+  }
 
   CXCursor canonical_cursor = clang_getCanonicalCursor( referenced_cursor );
 
-  if ( !CursorIsValid( canonical_cursor ) )
+  if ( !CursorIsValid( canonical_cursor ) ) {
     return Location( clang_getCursorLocation( referenced_cursor ) );
+  }
 
   return Location( clang_getCursorLocation( canonical_cursor ) );
 }
 
-Location TranslationUnit::GetDefinitionLocation(
+Location TranslationUnit::GetDeclarationLocation(
+  const std::string &filename,
   int line,
   int column,
   const std::vector< UnsavedFile > &unsaved_files,
   bool reparse ) {
-  if ( reparse )
+  if ( reparse ) {
     Reparse( unsaved_files );
+  }
 
   unique_lock< mutex > lock( clang_access_mutex_ );
 
-  if ( !clang_translation_unit_ )
+  if ( !clang_translation_unit_ ) {
     return Location();
+  }
 
-  CXCursor cursor = GetCursor( line, column );
+  CXCursor cursor = GetCursor( filename, line, column );
 
-  if ( !CursorIsValid( cursor ) )
+  if ( !CursorIsValid( cursor ) ) {
     return Location();
+  }
 
+  return GetDeclarationLocationForCursor( cursor );
+}
+
+Location TranslationUnit::GetDefinitionLocationForCursor( CXCursor cursor ) {
   CXCursor definition_cursor = clang_getCursorDefinition( cursor );
 
-  if ( !CursorIsValid( definition_cursor ) )
+  if ( !CursorIsValid( definition_cursor ) ) {
     return Location();
+  }
 
   return Location( clang_getCursorLocation( definition_cursor ) );
 }
 
+Location TranslationUnit::GetDefinitionLocation(
+  const std::string &filename,
+  int line,
+  int column,
+  const std::vector< UnsavedFile > &unsaved_files,
+  bool reparse ) {
+  if ( reparse ) {
+    Reparse( unsaved_files );
+  }
+
+  unique_lock< mutex > lock( clang_access_mutex_ );
+
+  if ( !clang_translation_unit_ ) {
+    return Location();
+  }
+
+  CXCursor cursor = GetCursor( filename, line, column );
+
+  if ( !CursorIsValid( cursor ) ) {
+    return Location();
+  }
+
+  return GetDefinitionLocationForCursor( cursor );
+}
+
+Location TranslationUnit::GetDefinitionOrDeclarationLocation(
+  const std::string &filename,
+  int line,
+  int column,
+  const std::vector< UnsavedFile > &unsaved_files,
+  bool reparse ) {
+  if ( reparse ) {
+    Reparse( unsaved_files );
+  }
+
+  unique_lock< mutex > lock( clang_access_mutex_ );
+
+  if ( !clang_translation_unit_ ) {
+    return Location();
+  }
+
+  CXCursor cursor = GetCursor( filename, line, column );
+
+  if ( !CursorIsValid( cursor ) ) {
+    return Location();
+  }
+
+  // Return the definition or the declaration of a symbol under the cursor
+  // according to the following logic:
+  //  - if the cursor is already on the definition, return the location of the
+  //    declaration;
+  //  - otherwise, search for the definition and return its location;
+  //  - if no definition is found, return the location of the declaration.
+  if ( clang_isCursorDefinition( cursor ) ) {
+    return GetDeclarationLocationForCursor( cursor );
+  }
+
+  Location location = GetDefinitionLocationForCursor( cursor );
+
+  if ( location.IsValid() ) {
+    return location;
+  }
+
+  return GetDeclarationLocationForCursor( cursor );
+}
+
 std::string TranslationUnit::GetTypeAtLocation(
+  const std::string &filename,
   int line,
   int column,
   const std::vector< UnsavedFile > &unsaved_files,
   bool reparse ) {
 
-  if ( reparse )
+  if ( reparse ) {
     Reparse( unsaved_files );
+  }
 
   unique_lock< mutex > lock( clang_access_mutex_ );
 
-  if ( !clang_translation_unit_ )
+  if ( !clang_translation_unit_ ) {
     return "Internal error: no translation unit";
+  }
 
-  CXCursor cursor = GetCursor( line, column );
+  CXCursor cursor = GetCursor( filename, line, column );
 
-  if ( !CursorIsValid( cursor ) )
+  if ( !CursorIsValid( cursor ) ) {
     return "Internal error: cursor not valid";
+  }
+
+  // Cursors on member functions return a rather unhelpful type text of
+  // "bound member function type".  To get a meaningful type, we must examine
+  // the referenced cursor.  We must be careful though, as both member variables
+  // and member functions are of kind MemberRefExpr, and getting the referenced
+  // cursor of a cv-qualified type discards the cv-qualification.
+  if ( clang_getCursorKind( cursor ) == CXCursor_MemberRefExpr ) {
+    CXCursor ref = clang_getCursorReferenced( cursor );
+    if ( clang_getCursorKind( ref ) == CXCursor_CXXMethod ) {
+      cursor = ref;
+    }
+  }
 
   CXType type = clang_getCursorType( cursor );
 
   std::string type_description =
     CXStringToString( clang_getTypeSpelling( type ) );
 
-  if ( type_description.empty() )
+  if ( type_description.empty() ) {
     return "Unknown type";
+  }
 
   // We have a choice here; libClang provides clang_getCanonicalType which will
   // return the "underlying" type for the type returned by clang_getCursorType
@@ -297,39 +378,45 @@ std::string TranslationUnit::GetTypeAtLocation(
     // Clang may return that the canonical type of a symbol is distinct from its
     // type even though they result in the same string. Only append the
     // canonical type if the strings are different.
-    if ( type_description != canonical_type_description )
+    if ( type_description != canonical_type_description ) {
       type_description += " => " + canonical_type_description;
+    }
   }
 
   return type_description;
 }
 
 std::string TranslationUnit::GetEnclosingFunctionAtLocation(
+  const std::string &filename,
   int line,
   int column,
   const std::vector< UnsavedFile > &unsaved_files,
   bool reparse ) {
 
-  if ( reparse )
+  if ( reparse ) {
     Reparse( unsaved_files );
+  }
 
   unique_lock< mutex > lock( clang_access_mutex_ );
 
-  if ( !clang_translation_unit_ )
+  if ( !clang_translation_unit_ ) {
     return "Internal error: no translation unit";
+  }
 
-  CXCursor cursor = GetCursor( line, column );
+  CXCursor cursor = GetCursor( filename, line, column );
 
-  if ( !CursorIsValid( cursor ) )
+  if ( !CursorIsValid( cursor ) ) {
     return "Internal error: cursor not valid";
+  }
 
   CXCursor parent = clang_getCursorSemanticParent( cursor );
 
   std::string parent_str =
     CXStringToString( clang_getCursorDisplayName( parent ) );
 
-  if ( parent_str.empty() )
+  if ( parent_str.empty() ) {
     return "Unknown semantic parent";
+  }
 
   return parent_str;
 }
@@ -352,25 +439,29 @@ void TranslationUnit::Reparse(
 // param though.
 void TranslationUnit::Reparse( std::vector< CXUnsavedFile > &unsaved_files,
                                size_t parse_options ) {
-  int failure = 0;
+  CXErrorCode failure;
   {
     unique_lock< mutex > lock( clang_access_mutex_ );
 
-    if ( !clang_translation_unit_ )
+    if ( !clang_translation_unit_ ) {
       return;
+    }
 
-    CXUnsavedFile *unsaved = unsaved_files.size() > 0
-                             ? &unsaved_files[ 0 ] : nullptr;
+    CXUnsavedFile *unsaved = unsaved_files.empty()
+                             ? nullptr : &unsaved_files[ 0 ];
 
-    failure = clang_reparseTranslationUnit( clang_translation_unit_,
-                                            unsaved_files.size(),
-                                            unsaved,
-                                            parse_options );
+    // This function should technically return a CXErrorCode enum but return an
+    // int instead.
+    failure = static_cast< CXErrorCode >(
+      clang_reparseTranslationUnit( clang_translation_unit_,
+                                    unsaved_files.size(),
+                                    unsaved,
+                                    parse_options ) );
   }
 
-  if ( failure ) {
+  if ( failure != CXError_Success ) {
     Destroy();
-    throw( ClangParseError() );
+    throw ClangParseError( failure );
   }
 
   UpdateLatestDiagnostics();
@@ -391,18 +482,20 @@ void TranslationUnit::UpdateLatestDiagnostics() {
                         clang_disposeDiagnostic ),
         clang_translation_unit_ );
 
-    if ( diagnostic.kind_ != INFORMATION )
+    if ( diagnostic.kind_ != DiagnosticKind::INFORMATION ) {
       latest_diagnostics_.push_back( diagnostic );
+    }
   }
 }
 
 namespace {
+
 /// Sort a FixIt container by its location's distance from a given column
 /// (such as the cursor location).
 ///
 /// PreCondition: All FixIts in the container are on the same line.
 struct sort_by_location {
-  sort_by_location( int column ) : column_( column ) { }
+  explicit sort_by_location( int column ) : column_( column ) { }
 
   bool operator()( const FixIt &a, const FixIt &b ) {
     int a_distance = a.location.column_number_ - column_;
@@ -414,29 +507,43 @@ struct sort_by_location {
 private:
   int column_;
 };
-}
+
+} // unnamed namespace
 
 std::vector< FixIt > TranslationUnit::GetFixItsForLocationInFile(
+  const std::string &filename,
   int line,
   int column,
   const std::vector< UnsavedFile > &unsaved_files,
   bool reparse ) {
 
-  if ( reparse )
+  if ( reparse ) {
     Reparse( unsaved_files );
+  }
 
   std::vector< FixIt > fixits;
+
+  auto normal_filename = NormalizePath( filename );
 
   {
     unique_lock< mutex > lock( diagnostics_mutex_ );
 
     for ( const Diagnostic& diagnostic : latest_diagnostics_ ) {
-      // Find all diagnostics for the supplied line which have FixIts attached
-      if ( diagnostic.location_.line_number_ == static_cast< size_t >( line ) ) {
-        fixits.insert( fixits.end(),
-                       diagnostic.fixits_.begin(),
-                       diagnostic.fixits_.end() );
+      auto this_filename = NormalizePath( diagnostic.location_.filename_ );
+
+      if ( normal_filename != this_filename ) {
+        continue;
       }
+
+      // Find all diagnostics for the supplied line which have FixIts attached
+      if ( diagnostic.location_.line_number_ !=
+             static_cast< size_t >( line ) ) {
+        continue;
+      }
+
+      fixits.insert( fixits.end(),
+                     diagnostic.fixits_.begin(),
+                     diagnostic.fixits_.end() );
     }
   }
 
@@ -448,54 +555,61 @@ std::vector< FixIt > TranslationUnit::GetFixItsForLocationInFile(
   return fixits;
 }
 
-DocumentationData TranslationUnit::GetDocsForLocationInFile(
-  int line,
-  int column,
+DocumentationData TranslationUnit::GetDocsForLocation(
+  const Location &location,
   const std::vector< UnsavedFile > &unsaved_files,
   bool reparse ) {
 
-  if ( reparse )
+  if ( reparse ) {
     Reparse( unsaved_files );
+  }
 
   unique_lock< mutex > lock( clang_access_mutex_ );
 
-  if ( !clang_translation_unit_ )
+  if ( !clang_translation_unit_ ) {
     return DocumentationData();
+  }
 
-  CXCursor cursor = GetCursor( line, column );
+  CXCursor cursor = GetCursor( location.filename_,
+                               location.line_number_,
+                               location.column_number_ );
 
-  if ( !CursorIsValid( cursor ) )
+  if ( !CursorIsValid( cursor ) ) {
     return DocumentationData();
+  }
 
-  // If the original cursor is a reference, then we return the documentation
-  // for the type/method/etc. that is referenced
-  CXCursor referenced_cursor = clang_getCursorReferenced( cursor );
-
-  if ( CursorIsValid( referenced_cursor ) )
-    cursor = referenced_cursor;
-
-  // We always want the documentation associated with the canonical declaration
-  CXCursor canonical_cursor = clang_getCanonicalCursor( cursor );
-
-  if ( !CursorIsValid( canonical_cursor ) )
-    return DocumentationData();
-
-  return DocumentationData( canonical_cursor );
+  return DocumentationData( cursor );
 }
 
-CXCursor TranslationUnit::GetCursor( int line, int column ) {
-  // ASSUMES A LOCK IS ALREADY HELD ON clang_access_mutex_!
-  if ( !clang_translation_unit_ )
-    return clang_getNullCursor();
+bool TranslationUnit::LocationIsInSystemHeader( const Location &location ) {
+  unique_lock< mutex > lock( clang_access_mutex_ );
 
-  CXFile file = clang_getFile( clang_translation_unit_, filename_.c_str() );
-  CXSourceLocation source_location = clang_getLocation(
-                                       clang_translation_unit_,
-                                       file,
-                                       line,
-                                       column );
+  if ( !clang_translation_unit_ || !location.IsValid() ) {
+    return false;
+  }
 
-  return clang_getCursor( clang_translation_unit_, source_location );
+  return clang_Location_isInSystemHeader(
+    GetSourceLocation( location.filename_,
+                       location.line_number_,
+                       location.column_number_ ) );
+}
+
+CXSourceLocation TranslationUnit::GetSourceLocation(
+  const std::string &filename,
+  int line,
+  int column ) {
+
+  // ASSUMES A LOCK IS ALREADY HELD ON clang_access_mutex_ AND THE TU IS VALID!
+  CXFile file = clang_getFile( clang_translation_unit_, filename.c_str() );
+  return clang_getLocation( clang_translation_unit_, file, line, column );
+}
+
+CXCursor TranslationUnit::GetCursor( const std::string &filename,
+                                     int line,
+                                     int column ) {
+  // ASSUMES A LOCK IS ALREADY HELD ON clang_access_mutex_ AND THE TU IS VALID!
+  return clang_getCursor( clang_translation_unit_,
+                          GetSourceLocation( filename, line, column ) );
 }
 
 } // namespace YouCompleteMe

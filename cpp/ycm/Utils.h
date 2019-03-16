@@ -1,4 +1,4 @@
-// Copyright (C) 2011, 2012 Google Inc.
+// Copyright (C) 2011-2018 ycmd contributors
 //
 // This file is part of ycmd.
 //
@@ -18,141 +18,60 @@
 #ifndef UTILS_H_KEPMRPBH
 #define UTILS_H_KEPMRPBH
 
+#include <boost/filesystem.hpp>
 #include <cmath>
 #include <limits>
 #include <string>
 #include <vector>
-#include <boost/filesystem.hpp>
 
 namespace fs = boost::filesystem;
 
 namespace YouCompleteMe {
 
-inline bool AlmostEqual( double a, double b ) {
-  return std::abs( a - b ) <=
-         ( std::numeric_limits< double >::epsilon() *
-           std::max( std::abs( a ), std::abs( b ) ) );
+YCM_EXPORT inline bool IsUppercase( uint8_t ascii_character ) {
+  return 'A' <= ascii_character && ascii_character <= 'Z';
 }
 
 
-YCM_EXPORT inline bool IsLowercase( char letter ) {
-  return 'a' <= letter && letter <= 'z';
-}
-
-
-YCM_EXPORT inline bool IsUppercase( char letter ) {
-  return 'A' <= letter && letter <= 'Z';
-}
-
-
-// A character is ASCII if it's in the range 0-127 i.e. its most significant bit
-// is 0.
-YCM_EXPORT inline bool IsAscii( char letter ) {
-  return !( letter & 0x80 );
-}
-
-
-YCM_EXPORT inline bool IsAlpha( char letter ) {
-  return IsLowercase( letter ) || IsUppercase( letter );
-}
-
-
-YCM_EXPORT inline bool IsPrintable( char letter ) {
-  return ' ' <= letter && letter <= '~';
-}
-
-
-YCM_EXPORT inline bool IsPrintable( const std::string &text ) {
-  for ( char letter : text ) {
-    if ( !IsPrintable( letter ) )
-      return false;
-  }
-  return true;
-}
-
-
-YCM_EXPORT inline bool IsPunctuation( char letter ) {
-  return ( '!' <= letter && letter <= '/' ) ||
-         ( ':' <= letter && letter <= '@' ) ||
-         ( '[' <= letter && letter <= '`' ) ||
-         ( '{' <= letter && letter <= '~' );
-}
-
-
-// A string is assumed to be in lowercase if none of its characters are
-// uppercase.
-YCM_EXPORT inline bool IsLowercase( const std::string &text ) {
-  for ( char letter : text ) {
-    if ( IsUppercase( letter ) )
-      return false;
-  }
-  return true;
-}
-
-
-// An uppercase character can be converted to lowercase and vice versa by
+// An uppercase ASCII character can be converted to lowercase and vice versa by
 // flipping its third most significant bit.
-YCM_EXPORT inline char Lowercase( char letter ) {
-  if ( IsUppercase( letter ) )
-    return letter ^ 0x20;
-  return letter;
+YCM_EXPORT inline uint8_t Lowercase( uint8_t ascii_character ) {
+  if ( IsUppercase( ascii_character ) ) {
+    return ascii_character ^ 0x20;
+  }
+  return ascii_character;
 }
 
 
 YCM_EXPORT inline std::string Lowercase( const std::string &text ) {
   std::string result;
-  for ( char letter : text )
-    result.push_back( Lowercase( letter ) );
-  return result;
-}
-
-
-YCM_EXPORT inline char Uppercase( char letter ) {
-  if ( IsLowercase( letter ) )
-    return letter ^ 0x20;
-  return letter;
-}
-
-
-YCM_EXPORT inline bool HasUppercase( const std::string &text ) {
-  for ( char letter : text ) {
-    if ( IsUppercase( letter ) )
-      return true;
+  for ( uint8_t ascii_character : text ) {
+    result.push_back( Lowercase( ascii_character ) );
   }
-  return false;
-}
-
-
-YCM_EXPORT inline char SwapCase( char letter ) {
-  if ( IsAlpha( letter ) )
-    return letter ^ 0x20;
-  return letter;
-}
-
-
-YCM_EXPORT inline std::string SwapCase( const std::string &text ) {
-  std::string result;
-  for ( char letter : text )
-    result.push_back( SwapCase( letter ) );
   return result;
 }
+
 
 // Reads the entire contents of the specified file. If the file does not exist,
 // an exception is thrown.
 std::string ReadUtf8File( const fs::path &filepath );
 
-// Writes the entire contents of the specified file. If the file does not exist,
-// an exception is thrown.
-YCM_EXPORT void WriteUtf8File( const fs::path &filepath,
-                                   const std::string &contents );
+
+// Normalizes a path by making it absolute relative to |base|, resolving
+// symbolic links, removing '.' and '..' in the path, and converting slashes
+// into backslashes on Windows. Contrarily to boost::filesystem::canonical, this
+// works even if the file doesn't exist.
+YCM_EXPORT fs::path NormalizePath( const fs::path &filepath,
+                                   const fs::path &base = fs::current_path() );
+
 
 template <class Container, class Key>
 typename Container::mapped_type &
 GetValueElseInsert( Container &container,
                     const Key &key,
-                    const typename Container::mapped_type &value ) {
-  return container.insert( typename Container::value_type( key, value ) )
-         .first->second;
+                    typename Container::mapped_type &&value ) {
+  return container.insert(
+    typename Container::value_type( key, std::move( value ) ) ).first->second;
 }
 
 
