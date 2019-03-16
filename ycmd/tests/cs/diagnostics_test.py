@@ -127,9 +127,6 @@ def Diagnostics_MultipleSolution_test( app ):
 
       results = app.post_json( '/event_notification', event_data ).json
 
-      # if 'solution-named' in filepath:
-      #   eq_( {}, results ) # TODO
-
       assert_that( results, has_items(
         has_entries( {
           'kind': equal_to( 'ERROR' ),
