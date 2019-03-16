@@ -29,7 +29,6 @@ import errno
 import time
 import requests
 import threading
-from subprocess import PIPE
 
 from ycmd.completers.completer import Completer
 from ycmd.completers.completer_utils import GetFileLines
@@ -43,17 +42,16 @@ SERVER_NOT_FOUND_MSG = ( 'OmniSharp server binary not found at {0}. ' +
                          '"./install.py --cs-completer".' )
 INVALID_FILE_MESSAGE = 'File is invalid.'
 NO_DIAGNOSTIC_MESSAGE = 'No diagnostic for current line!'
-PATH_TO_LEGACY_OMNISHARP_BINARY = os.path.join(
+PATH_TO_ROSLYN_OMNISHARP = os.path.join(
   os.path.abspath( os.path.dirname( __file__ ) ),
-  '..', '..', '..', 'third_party', 'OmniSharpServer',
-  'OmniSharp', 'bin', 'Release', 'OmniSharp.exe' )
-PATH_TO_ROSLYN_OMNISHARP_BINARY = os.path.join(
-  os.path.abspath( os.path.dirname( __file__ ) ),
-  '..', '..', '..', 'third_party', 'omnisharp-roslyn', 'OmniSharp'
+  '..', '..', '..', 'third_party', 'omnisharp-roslyn'
 )
+PATH_TO_ROSLYN_OMNISHARP_BINARY = os.path.join(
+  PATH_TO_ROSLYN_OMNISHARP, 'Omnisharp.exe' )
 if ( not os.path.isfile( PATH_TO_ROSLYN_OMNISHARP_BINARY )
-     and os.path.isfile( PATH_TO_ROSLYN_OMNISHARP_BINARY + '.exe' ) ):
-  PATH_TO_ROSLYN_OMNISHARP_BINARY += '.exe'
+     and os.path.isfile( os.join( PATH_TO_ROSLYN_OMNISHARP, 'Run' ) ) ):
+  PATH_TO_ROSLYN_OMNISHARP_BINARY = (
+    os.join( PATH_TO_ROSLYN_OMNISHARP, 'Run' ) )
 LOGFILE_FORMAT = 'omnisharp_{port}_{sln}_{std}_'
 
 
@@ -147,10 +145,10 @@ class CsharpCompleter( Completer ):
          self._SolutionSubcommand( request_data,
                                    method = '_RestartServer',
                                    no_request_data = True ) ),
-      'ReloadSolution'                   : ( lambda self, request_data, args:
-         self._SolutionSubcommand( request_data,
-                                   method = '_ReloadSolution',
-                                   no_request_data = True ) ),
+      # 'ReloadSolution'                   : ( lambda self, request_data, args:
+      #    self._SolutionSubcommand( request_data,
+      #                              method = '_ReloadSolution',
+      #                              no_request_data = True ) ),
       'SolutionFile'                     : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_SolutionFile',
@@ -179,28 +177,22 @@ class CsharpCompleter( Completer ):
       'GetType'                          : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_GetType' ) ),
-      'FixIt'                            : ( lambda self, request_data, args:
-         self._SolutionSubcommand( request_data,
-                                   method = '_FixIt' ) ),
+      # 'FixIt'                            : ( lambda self, request_data, args:
+      #    self._SolutionSubcommand( request_data,
+      #                              method = '_FixIt' ) ),
       'GetDoc'                           : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_GetDoc' ) ),
-      'ServerIsHealthy'                  : ( lambda self, request_data, args:
-         self._SolutionSubcommand( request_data,
-                                   method = 'ServerIsHealthy',
-                                   no_request_data = True ) ),
-      'ServerIsReady'                    : ( lambda self, request_data, args:
-         self._SolutionSubcommand( request_data,
-                                   method = 'ServerIsReady',
-                                   no_request_data = True ) ),
-      'SetOmnisharpPath'                 : ( lambda self, request_data, args:
-         self._SetOmnisharpPath( request_data, args[ 0 ] ) ),
-      'UseLegacyOmnisharp'                 : ( lambda self, request_data, args:
-         self._SetOmnisharpPath( request_data,
-                                 PATH_TO_LEGACY_OMNISHARP_BINARY ) ),
-      'UseRoslynOmnisharp'                 : ( lambda self, request_data, args:
-         self._SetOmnisharpPath( request_data,
-                                 PATH_TO_ROSLYN_OMNISHARP_BINARY ) ),
+      # 'ServerIsHealthy'                  : ( lambda self, request_data, args:
+      #    self._SolutionSubcommand( request_data,
+      #                              method = 'ServerIsHealthy',
+      #                              no_request_data = True ) ),
+      # 'ServerIsReady'                    : ( lambda self, request_data, args:
+      #    self._SolutionSubcommand( request_data,
+      #                              method = 'ServerIsReady',
+      #                              no_request_data = True ) ),
+      # 'SetOmnisharpPath'                 : ( lambda self, request_data, args:
+      #    self._SetOmnisharpPath( request_data, args[ 0 ] ) ),
     }
 
 
@@ -240,7 +232,7 @@ class CsharpCompleter( Completer ):
 
 
   def _QuickFixToDiagnostic( self, request_data, quick_fix ):
-    filename = _ConvertFilenameForCygwin( quick_fix[ "FileName" ], False )
+    filename = quick_fix[ "FileName" ]
     # NOTE: end of diagnostic range returned by the OmniSharp server is not
     # included.
     location = _BuildLocation( request_data,
@@ -393,28 +385,21 @@ class CsharpSolutionCompleter( object ):
         return
 
       LOGGER.info( 'Starting OmniSharp server' )
-
-      path_to_solutionfile = _ConvertFilenameForCygwin( self._solution_path,
-                                                        True )
-      LOGGER.info( 'Loading solution file %s', path_to_solutionfile )
+      LOGGER.info( 'Loading solution file %s', self._solution_path )
 
       self._ChooseOmnisharpPort()
-
-      omnisharp_path = self._omnisharp_path
-      command_path = path_to_solutionfile
 
       # Roslyn fails unless you open it in shell in Window on Python 2
       # Shell isn't preferred, but I don't see any other way to resolve
       shell_required = PY2 and utils.OnWindows()
 
-      command = [ omnisharp_path,
+      command = [ self._omnisharp_path,
                   '-p',
                   str( self._omnisharp_port ),
                   '-s',
-                  u'{0}'.format( command_path ) ]
+                  u'{0}'.format( self._solution_path ) ]
 
-      if ( not utils.OnWindows() and not utils.OnCygwin()
-           and self._omnisharp_path.endswith( '.exe' ) ):
+      if ( not utils.OnWindows() and self._omnisharp_path.endswith( '.exe' ) ):
         command.insert( 0, 'mono' )
 
       LOGGER.info( 'Starting OmniSharp server with: ' + str( command ) )
@@ -435,7 +420,7 @@ class CsharpSolutionCompleter( object ):
               command, stdout = fstdout, stderr = fstderr,
               shell = shell_required )
 
-      LOGGER.info( 'Starting OmniSharp server' )
+      LOGGER.info( 'Started OmniSharp server' )
 
 
   def _StopServer( self ):
@@ -505,13 +490,13 @@ class CsharpSolutionCompleter( object ):
       return self._StartServer()
 
 
-  def _ReloadSolution( self ):
-    """ Reloads the solutions in the OmniSharp server """
-    LOGGER.info( 'Reloading Solution in OmniSharp server' )
-    try:
-      return self._GetResponse( '/reloadsolution' )
-    except ValueError:
-      return False
+  # def _ReloadSolution( self ):
+  #   """ Reloads the solutions in the OmniSharp server """
+  #   LOGGER.info( 'Reloading Solution in OmniSharp server' )
+  #   try:
+  #     return self._GetResponse( '/reloadsolution' )
+  #   except ValueError:
+  #     return False
 
 
   def _GetCompletions( self, request_data ):
@@ -529,7 +514,7 @@ class CsharpSolutionCompleter( object ):
     definition = self._GetResponse( '/gotodefinition',
                                     self._DefaultParameters( request_data ) )
     if definition[ 'FileName' ] is not None:
-      filepath = _ConvertFilenameForCygwin( definition[ 'FileName' ], False )
+      filepath = definition[ 'FileName' ]
       return responses.BuildGoToResponseFromLocation(
         _BuildLocation( request_data,
                         filepath,
@@ -546,19 +531,17 @@ class CsharpSolutionCompleter( object ):
         self._DefaultParameters( request_data ) )
 
     if implementation[ 'QuickFixes' ]:
-      def convert( filename ):
-        return _ConvertFilenameForCygwin( filename, False )
       if len( implementation[ 'QuickFixes' ] ) == 1:
         return responses.BuildGoToResponseFromLocation(
           _BuildLocation(
             request_data,
-            convert( implementation[ 'QuickFixes' ][ 0 ][ 'FileName' ] ),
+            implementation[ 'QuickFixes' ][ 0 ][ 'FileName' ],
             implementation[ 'QuickFixes' ][ 0 ][ 'Line' ],
             implementation[ 'QuickFixes' ][ 0 ][ 'Column' ] ) )
       else:
         return [ responses.BuildGoToResponseFromLocation(
                    _BuildLocation( request_data,
-                                   convert( x[ 'FileName' ] ),
+                                   x[ 'FileName' ],
                                    x[ 'Line' ],
                                    x[ 'Column' ] ) )
                  for x in implementation[ 'QuickFixes' ] ]
@@ -581,22 +564,22 @@ class CsharpSolutionCompleter( object ):
     return responses.BuildDisplayMessageResponse( message )
 
 
-  def _FixIt( self, request_data ):
-    request = self._DefaultParameters( request_data )
+  # def _FixIt( self, request_data ):
+  #   request = self._DefaultParameters( request_data )
 
-    result = self._GetResponse( '/fixcodeissue', request )
-    replacement_text = result[ "Text" ]
-    # Note: column_num is already a byte offset so we don't need to use
-    # _BuildLocation.
-    filepath = _ConvertFilenameForCygwin( request_data[ 'filepath' ], False )
-    location = responses.Location( request_data[ 'line_num' ],
-                                   request_data[ 'column_num' ],
-                                   filepath )
-    fixits = [ responses.FixIt( location,
-                                _BuildChunks( request_data,
-                                              replacement_text ) ) ]
+  #   result = self._GetResponse( '/fixcodeissue', request )
+  #   replacement_text = result[ "Text" ]
+  #   # Note: column_num is already a byte offset so we don't need to use
+  #   # _BuildLocation.
+  #   filepath = request_data[ 'filepath' ]
+  #   location = responses.Location( request_data[ 'line_num' ],
+  #                                  request_data[ 'column_num' ],
+  #                                  filepath )
+  #   fixits = [ responses.FixIt( location,
+  #                               _BuildChunks( request_data,
+  #                                             replacement_text ) ) ]
 
-    return responses.BuildFixItResponse( fixits )
+  #   return responses.BuildFixItResponse( fixits )
 
 
   def _GetDoc( self, request_data ):
@@ -620,7 +603,6 @@ class CsharpSolutionCompleter( object ):
     filepath = request_data[ 'filepath' ]
     parameters[ 'buffer' ] = (
       request_data[ 'file_data' ][ filepath ][ 'contents' ] )
-    filepath = _ConvertFilenameForCygwin( filepath, True )
     parameters[ 'filename' ] = filepath
     return parameters
 
@@ -775,34 +757,3 @@ def _BuildLocation( request_data, filename, line_num, column_num ):
       line_num,
       CodepointOffsetToByteOffset( line_value, column_num ),
       filename )
-
-
-_cygpath_data = {
-  True: { 'Process': None, 'Data': {} },
-  False: { 'Process': None, 'Data': {} }
-}
-
-
-def _ConvertFilenameForCygwin( filename, direction ):
-  global _cygpath_data
-  if not utils.OnCygwin():
-    return filename
-  else: # pragma: no cover
-    direction = True if direction else False
-
-    try:
-      return _cygpath_data[ direction ][ 'Data' ][ filename ]
-    except KeyError:
-      cygpath = _cygpath_data[ direction ][ 'Process' ]
-      if not cygpath:
-        dir_arg = '-w' if direction else '-u'
-        command = [ 'cygpath', '-f', '-', dir_arg ]
-        cygpath = utils.SafePopen( command , stdout = PIPE, stdin = PIPE )
-        _cygpath_data[ direction ][ 'Process' ] = cygpath
-
-      cygpath.stdin.write( filename + "\n" )
-      result = cygpath.stdout.readline().rstrip()
-
-      _cygpath_data[ direction ][ 'Data' ][ filename ] = result
-
-      return result

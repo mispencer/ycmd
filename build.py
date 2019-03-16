@@ -386,9 +386,6 @@ def ParseArguments():
                        help = 'Enable Go semantic completion engine.' )
   parser.add_argument( '--rust-completer', action = 'store_true',
                        help = 'Enable Rust semantic completion engine.' )
-  parser.add_argument( '--new-cs-completer', action = 'store_true',
-                       help = 'Build C# semantic completion engine'
-                       ' (roslyn version).' )
   parser.add_argument( '--java-completer', action = 'store_true',
                        help = 'Enable Java semantic completion engine.' ),
   parser.add_argument( '--ts-completer', action = 'store_true',

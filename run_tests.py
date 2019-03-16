@@ -77,7 +77,7 @@ COMPLETERS = {
     'aliases': []
   },
   'cs': {
-    'build': [ '--cs-completer', '--new-cs-completer' ],
+    'build': [ '--cs-completer' ],
     'test': [ '--exclude-dir=ycmd/tests/cs' ],
     'aliases': [ 'omnisharp', 'csharp', 'c#' ]
   },
