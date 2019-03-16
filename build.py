@@ -673,7 +673,7 @@ def EnableCsCompleter( args ):
 
     url_pattern = ( "https://github.com/OmniSharp/omnisharp-roslyn/"
                     "releases/download/{0}/{1}" )
-    version = "v1.28.0"
+    version = "v1.32.8"
     url_file = GetCsCompleterFileNameForPlatform()
 
     try:
@@ -681,14 +681,20 @@ def EnableCsCompleter( args ):
     except OSError:
       pass
 
-    file_path = p.join( version, url_file )
-    if not p.exists( file_path ):
-      sys.path.insert( 1, p.abspath( p.join( DIR_OF_THIRD_PARTY,
-                                             'requests' ) ) )
-      import requests
-      result = requests.get( url_pattern.format( version, url_file ) )
-      with open( file_path, 'wb' ) as fh:
-        fh.write( result.content )
+    package_path = p.join( version, url_file )
+    if not p.exists( package_path ):
+      DownloadFileTo( url_pattern.format( version, url_file ), p.join( build_dir, package_path ) )
+
+    for file_name in os.listdir( build_dir ):
+      file_path = os.path.join( build_dir, file_name )
+      if file_name == version:
+        continue
+      if os.path.isfile( file_path ):
+        os.unlink( file_path )
+      elif os.path.isdir( file_path ):
+        import shutil
+        shutil.rmtree( file_path )
+
 
     if OnWindows():
       try:
@@ -702,9 +708,9 @@ def EnableCsCompleter( args ):
           with _winreg.OpenKey( S, '7-Zip', 0, wow64 ) as SZ:
             seven_zip_path = _winreg.QueryValueEx( SZ, 'Path' )[ 0 ]
 
-      extract_command = [ p.join( seven_zip_path, '7z.exe' ), 'x', file_path ]
+      extract_command = [ p.join( seven_zip_path, '7z.exe' ), 'x', package_path ]
     else:
-      extract_command = [ 'tar', 'xfv', file_path ]
+      extract_command = [ 'tar', 'xfv', package_path ]
 
     subprocess.check_call( extract_command )
   finally:
