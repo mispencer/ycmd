@@ -25,6 +25,7 @@ from builtins import *  # noqa
 from contextlib import contextmanager
 import functools
 import os
+import time
 
 from ycmd.tests.test_utils import ( ClearCompletionsCache,
                                     IgnoreExtraConfOutsideTestsFolder,
@@ -69,7 +70,8 @@ def WrapOmniSharpServer( app, filepath ):
   if filepath not in shared_filepaths:
     StartCompleterServer( app, 'cs', filepath )
     shared_filepaths.append( filepath )
-  WaitUntilCompleterServerReady( app, 'cs' )
+    WaitUntilCompleterServerReady( app, 'cs' )
+    time.sleep( 5 )
   yield
 
 

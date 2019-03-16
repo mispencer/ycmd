@@ -24,6 +24,7 @@ from builtins import *  # noqa
 
 from hamcrest import assert_that, has_entry, has_entries, contains
 from mock import patch
+from nose import SkipTest
 from nose.tools import eq_, ok_
 from webtest import AppError
 import pprint
@@ -57,7 +58,7 @@ def Subcommands_GoTo_Basic_test( app ):
     eq_( {
       'filepath': PathToTestFile( 'testy', 'Program.cs' ),
       'line_num': 7,
-      'column_num': 3
+      'column_num': 22
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -78,7 +79,7 @@ def Subcommands_GoTo_Unicode_test( app ):
     eq_( {
       'filepath': PathToTestFile( 'testy', 'Unicode.cs' ),
       'line_num': 30,
-      'column_num': 37
+      'column_num': 54
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -101,7 +102,7 @@ def Subcommands_GoToImplementation_Basic_test( app ):
     eq_( {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
       'line_num': 30,
-      'column_num': 3
+      'column_num': 15
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -133,6 +134,7 @@ def Subcommands_GoToImplementation_NoImplementation_test( app ):
 
 @SharedYcmd
 def Subcommands_CsCompleter_InvalidLocation_test( app ):
+  raise SkipTest( "TODO" )
   filepath = PathToTestFile( 'testy', 'GotoTestCase.cs' )
   with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
@@ -176,7 +178,7 @@ def Subcommands_GoToImplementationElseDeclaration_NoImplementation_test( app ):
     eq_( {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
       'line_num': 35,
-      'column_num': 3
+      'column_num': 8
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -200,7 +202,7 @@ def Subcommands_GoToImplementationElseDeclaration_SingleImplementation_test(
     eq_( {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
       'line_num': 30,
-      'column_num': 3
+      'column_num': 15
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -224,11 +226,11 @@ def Subcommands_GoToImplementationElseDeclaration_MultipleImplementations_test(
     eq_( [ {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
       'line_num': 43,
-      'column_num': 3
+      'column_num': 15
     }, {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
       'line_num': 48,
-      'column_num': 3
+      'column_num': 15
     } ], app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -251,11 +253,11 @@ def Subcommands_GetToImplementation_Unicode_test( app ):
     eq_( [ {
       'filepath': PathToTestFile( 'testy', 'Unicode.cs' ),
       'line_num': 49,
-      'column_num': 54
+      'column_num': 66
     }, {
       'filepath': PathToTestFile( 'testy', 'Unicode.cs' ),
       'line_num': 50,
-      'column_num': 50
+      'column_num': 62
     } ], app.post_json( '/run_completer_command', goto_data ).json )
 
 
@@ -274,7 +276,7 @@ def Subcommands_GetType_EmptyMessage_test( app ):
                                  filepath = filepath )
 
     eq_( {
-      u'message': u""
+      u'message': None
     }, app.post_json( '/run_completer_command', gettype_data ).json )
 
 
@@ -293,7 +295,7 @@ def Subcommands_GetType_VariableDeclaration_test( app ):
                                  filepath = filepath )
 
     eq_( {
-      u'message': u"string"
+      u'message': u"System.String"
     }, app.post_json( '/run_completer_command', gettype_data ).json )
 
 
@@ -318,6 +320,7 @@ def Subcommands_GetType_VariableUsage_test( app ):
 
 @SharedYcmd
 def Subcommands_GetType_Constant_test( app ):
+  raise SkipTest( "No support for constant type in rosyln?" )
   filepath = PathToTestFile( 'testy', 'GetTypeTestCase.cs' )
   with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
@@ -350,7 +353,7 @@ def Subcommands_GetType_DocsIgnored_test( app ):
                                  filepath = filepath )
 
     eq_( {
-      u'message': u"int GetTypeTestCase.an_int_with_docs;",
+      u'message': u"int GetTypeTestCase.an_int_with_docs",
     }, app.post_json( '/run_completer_command', gettype_data ).json )
 
 
@@ -369,7 +372,7 @@ def Subcommands_GetDoc_Variable_test( app ):
                                 filepath = filepath )
 
     eq_( {
-      'detailed_info': 'int GetDocTestCase.an_int;\n'
+      'detailed_info': 'int GetDocTestCase.an_int\n'
                        'an integer, or something',
     }, app.post_json( '/run_completer_command', getdoc_data ).json )
 
@@ -388,11 +391,10 @@ def Subcommands_GetDoc_Function_test( app ):
                                 filetype = 'cs',
                                 filepath = filepath )
 
-    # It seems that Omnisharp server eats newlines
     eq_( {
-      'detailed_info': 'int GetDocTestCase.DoATest();\n'
-                       ' Very important method. With multiple lines of '
-                       'commentary And Format- -ting',
+      'detailed_info': 'int GetDocTestCase.DoATest()\n'
+                       'Very important method.\n\nWith multiple lines of '
+                       'commentary\nAnd Format-\n-ting',
     }, app.post_json( '/run_completer_command', getdoc_data ).json )
 
 
@@ -401,6 +403,7 @@ def RunFixItTest( app,
                   column,
                   result_matcher,
                   filepath = [ 'testy', 'FixItTestCase.cs' ] ):
+  raise SkipTest( "No support for fixit in rosyln" )
   filepath = PathToTestFile( *filepath )
   with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )

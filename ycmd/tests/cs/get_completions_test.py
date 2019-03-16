@@ -26,6 +26,7 @@ from builtins import *  # noqa
 
 from hamcrest import ( assert_that, calling, empty, greater_than, has_item,
                        has_items, has_entries, raises )
+from nose import SkipTest
 from nose.tools import eq_
 from webtest import AppError
 
@@ -64,9 +65,10 @@ def GetCompletions_Unicode_test( app ):
                                     line_num = 43,
                                     column_num = 26 )
     response_data = app.post_json( '/completions', completion_data ).json
+
     assert_that( response_data[ 'completions' ],
                  has_items(
-                   CompletionEntryMatcher( 'DoATest()' ),
+                   CompletionEntryMatcher( 'DoATest' ),
                    CompletionEntryMatcher( 'an_int' ),
                    CompletionEntryMatcher( 'a_unicøde' ),
                    CompletionEntryMatcher( 'øøø' ) ) )
@@ -81,18 +83,18 @@ def GetCompletions_MultipleSolution_test( app ):
                                 'solution-named-like-folder',
                                 'testy',
                                 'Program.cs' ) ]
-  lines = [ 10, 9 ]
-  for filepath, line in zip( filepaths, lines ):
+  for filepath in filepaths:
     with WrapOmniSharpServer( app, filepath ):
       contents = ReadFile( filepath )
 
       completion_data = BuildRequest( filepath = filepath,
                                       filetype = 'cs',
                                       contents = contents,
-                                      line_num = line,
+                                      line_num = 10,
                                       column_num = 12 )
       response_data = app.post_json( '/completions',
                                      completion_data ).json
+
       assert_that( response_data[ 'completions' ],
                    has_items( CompletionEntryMatcher( 'CursorLeft' ),
                               CompletionEntryMatcher( 'CursorSize' ) ) )
@@ -119,6 +121,7 @@ def GetCompletions_PathWithSpace_test( app ):
 
 @SharedYcmd
 def GetCompletions_HasBothImportsAndNonImport_test( app ):
+  raise SkipTest( "No support for import in rosyln" )
   filepath = PathToTestFile( 'testy', 'ImportTest.cs' )
   with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
@@ -141,6 +144,7 @@ def GetCompletions_HasBothImportsAndNonImport_test( app ):
 
 @SharedYcmd
 def GetCompletions_ImportsOrderedAfter_test( app ):
+  raise SkipTest( "No support for import in rosyln" )
   filepath = PathToTestFile( 'testy', 'ImportTest.cs' )
   with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
@@ -171,6 +175,7 @@ def GetCompletions_ImportsOrderedAfter_test( app ):
 
 @SharedYcmd
 def GetCompletions_ForcedReturnsResults_test( app ):
+  raise SkipTest( "No support for forced in rosyln" )
   filepath = PathToTestFile( 'testy', 'ContinuousTest.cs' )
   with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
@@ -191,6 +196,7 @@ def GetCompletions_ForcedReturnsResults_test( app ):
 
 @SharedYcmd
 def GetCompletions_NonForcedReturnsNoResults_test( app ):
+  raise SkipTest( "No support for forced in rosyln" )
   filepath = PathToTestFile( 'testy', 'ContinuousTest.cs' )
   with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
@@ -223,6 +229,7 @@ def GetCompletions_NonForcedReturnsNoResults_test( app ):
 
 @SharedYcmd
 def GetCompletions_ForcedDividesCache_test( app ):
+  raise SkipTest( "No support for forced in rosyln" )
   filepath = PathToTestFile( 'testy', 'ContinuousTest.cs' )
   with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
@@ -267,6 +274,7 @@ def GetCompletions_ForcedDividesCache_test( app ):
 
 @SharedYcmd
 def GetCompletions_ReloadSolution_Basic_test( app ):
+  raise SkipTest( "No support for reload in rosyln" )
   filepath = PathToTestFile( 'testy', 'Program.cs' )
   with WrapOmniSharpServer( app, filepath ):
     result = app.post_json(
@@ -281,6 +289,7 @@ def GetCompletions_ReloadSolution_Basic_test( app ):
 
 @SharedYcmd
 def GetCompletions_ReloadSolution_MultipleSolution_test( app ):
+  raise SkipTest( "No support for reload in rosyln" )
   filepaths = [ PathToTestFile( 'testy', 'Program.cs' ),
                 PathToTestFile( 'testy-multiple-solutions',
                                 'solution-named-like-folder',
