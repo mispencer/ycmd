@@ -721,6 +721,8 @@ def GetSevenZipPath():
 
 
 USE_MONO_PACKAGE = False
+
+
 def GetCsCompleterFileNameForPlatform():
   if OnWindows():
     dotnetversion_output = CheckOutput( [ 'reg', 'query',
