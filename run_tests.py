@@ -256,6 +256,8 @@ def NoseTests( parsed_args, extra_nosetests_args ):
     # We prepend the Clang third-party directory to the PATH instead of
     # overwriting it so that the executable is able to find the Python library.
     env[ 'PATH' ] = LIBCLANG_DIR + ';' + env[ 'PATH' ]
+  elif 'LD_LIBRARY_PATH' in env:
+    env[ 'LD_LIBRARY_PATH' ] = env[ 'LD_LIBRARY_PATH' ] + ':' + LIBCLANG_DIR
   else:
     env[ 'LD_LIBRARY_PATH' ] = LIBCLANG_DIR
 
