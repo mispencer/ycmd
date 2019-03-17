@@ -27,7 +27,8 @@ import functools
 import os
 import time
 
-from ycmd.tests.test_utils import ( ClearCompletionsCache,
+from ycmd.tests.test_utils import ( BuildRequest,
+                                    ClearCompletionsCache,
                                     IgnoreExtraConfOutsideTestsFolder,
                                     IsolatedApp,
                                     SetUpApp,
@@ -37,6 +38,7 @@ from ycmd.tests.test_utils import ( ClearCompletionsCache,
 
 shared_app = None
 shared_filepaths = []
+shared_log_indexes = {}
 
 
 def PathToTestFile( *args ):
@@ -63,16 +65,47 @@ def tearDownPackage():
     StopCompleterServer( shared_app, 'cs', filepath )
 
 
+def GetDebugInfo( app, filepath ):
+  """ TODO: refactor here and in clangd test to common util """
+  request_data = BuildRequest( filetype = 'cs', filepath = filepath )
+  return app.post_json( '/debug_info', request_data ).json
+
+
+def ReadFile( filepath, fileposition ):
+  with open( filepath, encoding = 'utf8' ) as f:
+    if fileposition:
+      f.seek( fileposition )
+    return f.read(), f.tell()
+
+
 @contextmanager
 def WrapOmniSharpServer( app, filepath ):
   global shared_filepaths
+  global shared_log_indexes
 
   if filepath not in shared_filepaths:
     StartCompleterServer( app, 'cs', filepath )
     shared_filepaths.append( filepath )
     WaitUntilCompleterServerReady( app, 'cs' )
     time.sleep( 5 )
-  yield
+
+  logfiles = []
+  response = GetDebugInfo( app, filepath )
+  for server in response[ 'completer' ][ 'servers' ]:
+    logfiles.extend( server[ 'logfiles' ] )
+
+  try:
+    yield
+  finally:
+    for logfile in logfiles:
+      if os.path.isfile( logfile ):
+        log_content, log_end_position = ReadFile(
+            logfile, shared_log_indexes.get( logfile, 0 ) )
+        shared_log_indexes[ logfile ] = log_end_position
+        sys.stdout.write( 'Logfile {0}:\n\n'.format( logfile ) )
+        sys.stdout.write( log_content )
+        sys.stdout.write( '\n' )
+
 
 
 def SharedYcmd( test ):
