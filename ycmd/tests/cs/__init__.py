@@ -25,6 +25,7 @@ from builtins import *  # noqa
 from contextlib import contextmanager
 import functools
 import os
+import sys
 import time
 
 from ycmd.tests.test_utils import ( BuildRequest,
