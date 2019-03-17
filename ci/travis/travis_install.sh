@@ -128,6 +128,4 @@ sh autogen.sh
 ./configure --prefix=$HOME/libuvinstall
 make
 make install
-export LD_LIBRARY_PATH="$HOME/libuvinstall/lib"
-export LIBRARY_PATH="$HOME/libuvinstall/lib"
 cd $OLDPWD
