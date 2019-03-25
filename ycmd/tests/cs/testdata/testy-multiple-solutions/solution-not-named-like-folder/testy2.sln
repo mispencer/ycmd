@@ -1,9 +1,7 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 15
-VisualStudioVersion = 15.0.28307.438
-MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "testy", "testy\testy.csproj", "{0C99F719-E00E-4CCD-AB9F-FEFBCD97C51F}"
+Microsoft Visual Studio Solution File, Format Version 11.00
+# Visual Studio 2010
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "testy", "testy/testy.csproj", "{0C99F719-E00E-4CCD-AB9F-FEFBCD97C51F}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -11,16 +9,10 @@ Global
 		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{0C99F719-E00E-4CCD-AB9F-FEFBCD97C51F}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{0C99F719-E00E-4CCD-AB9F-FEFBCD97C51F}.Debug|x86.Build.0 = Debug|Any CPU
-		{0C99F719-E00E-4CCD-AB9F-FEFBCD97C51F}.Release|x86.ActiveCfg = Release|Any CPU
-		{0C99F719-E00E-4CCD-AB9F-FEFBCD97C51F}.Release|x86.Build.0 = Release|Any CPU
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
-	EndGlobalSection
-	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {2C332E52-8F68-44E2-8CBE-E1312E9B53DE}
+		{0C99F719-E00E-4CCD-AB9F-FEFBCD97C51F}.Debug|x86.ActiveCfg = Debug|x86
+		{0C99F719-E00E-4CCD-AB9F-FEFBCD97C51F}.Debug|x86.Build.0 = Debug|x86
+		{0C99F719-E00E-4CCD-AB9F-FEFBCD97C51F}.Release|x86.ActiveCfg = Release|x86
+		{0C99F719-E00E-4CCD-AB9F-FEFBCD97C51F}.Release|x86.Build.0 = Release|x86
 	EndGlobalSection
 	GlobalSection(MonoDevelopProperties) = preSolution
 		StartupItem = testy/testy.csproj
