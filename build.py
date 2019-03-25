@@ -700,7 +700,7 @@ def CleanCsCompleter( build_dir, version ):
     if file_name == version:
       continue
     if os.path.isfile( file_path ):
-      os.unlink( file_path )
+      os.remove( file_path )
     elif os.path.isdir( file_path ):
       import shutil
       shutil.rmtree( file_path )
@@ -750,10 +750,9 @@ def GetCsCompleterFileNameForPlatform():
     else:
       if OnMac():
         return 'omnisharp.http-osx.tar.gz'
-      elif platform.machine().endswith( '64' ):
+      if platform.machine().endswith( '64' ):
         return 'omnisharp.http-linux-x64.tar.gz'
-      else:
-        return 'omnisharp.http-linux-x86.tar.gz'
+      return 'omnisharp.http-linux-x86.tar.gz'
 
 
 def ToUnicode( value ):

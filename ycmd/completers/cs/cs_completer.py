@@ -73,7 +73,6 @@ class CsharpCompleter( Completer ):
            SERVER_NOT_FOUND_MSG.format( self._omnisharp_path ) )
 
 
-
   def Shutdown( self ):
     if self.user_options[ 'auto_stop_csharp_server' ]:
       for solutioncompleter in itervalues( self._completer_per_solution ):
@@ -108,10 +107,8 @@ class CsharpCompleter( Completer ):
     """ Preempt the identity completer always, since the C# completer is fast
     enough to do so and it will returns more relevant results. Fallback to use
     the triggers, which are by default . -> and :: """
-    if ( self.QueryLengthAboveMinThreshold( request_data ) ):
-      return True
-    else:
-      return super( CsharpCompleter, self ).ShouldUseNowInner( request_data )
+    return ( self.QueryLengthAboveMinThreshold( request_data ) or
+      super( CsharpCompleter, self ).ShouldUseNowInner( request_data ) )
 
 
   def ComputeCandidatesInner( self, request_data ):
@@ -177,20 +174,13 @@ class CsharpCompleter( Completer ):
       'GetType'                          : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_GetType' ) ),
+      # To be re-enabled after FixIt support is added to Omnisharp
       # 'FixIt'                            : ( lambda self, request_data, args:
       #    self._SolutionSubcommand( request_data,
       #                              method = '_FixIt' ) ),
       'GetDoc'                           : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_GetDoc' ) ),
-      # 'ServerIsHealthy'                  : ( lambda self, request_data, args:
-      #    self._SolutionSubcommand( request_data,
-      #                              method = 'ServerIsHealthy',
-      #                              no_request_data = True ) ),
-      # 'ServerIsReady'                    : ( lambda self, request_data, args:
-      #    self._SolutionSubcommand( request_data,
-      #                              method = 'ServerIsReady',
-      #                              no_request_data = True ) ),
       # 'SetOmnisharpPath'                 : ( lambda self, request_data, args:
       #    self._SetOmnisharpPath( request_data, args[ 0 ] ) ),
     }
@@ -490,6 +480,7 @@ class CsharpSolutionCompleter( object ):
       return self._StartServer()
 
 
+  # TODO: Add back when/if Omnisharp supports this properly
   # def _ReloadSolution( self ):
   #   """ Reloads the solutions in the OmniSharp server """
   #   LOGGER.info( 'Reloading Solution in OmniSharp server' )
@@ -649,9 +640,7 @@ class CsharpSolutionCompleter( object ):
     """ Handle communication with server """
     target = urljoin( self._ServerLocation(), handler )
     LOGGER.info( u'Sending request' )
-    response = requests.post( target,
-                              json = parameters,
-                              timeout = timeout )
+    response = requests.post( target, json = parameters, timeout = timeout )
     LOGGER.info( u'Received response request' )
     return response.json()
 
