@@ -125,7 +125,14 @@ set +e
 # Libuv is required for Omnisharp-Roslyn and isn't in accessible repos
 curl -sSL https://github.com/libuv/libuv/archive/v1.18.0.tar.gz | tar zxfv - -C /tmp && cd /tmp/libuv-1.18.0/
 sh autogen.sh
-./configure --prefix=$HOME/libuvinstall
+./configure
 make
-make install
+sudo make install
 cd $OLDPWD
+
+#Install mono
+sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF
+sudo apt install apt-transport-https ca-certificates
+echo "deb https://download.mono-project.com/repo/ubuntu stable-trusty main" | sudo tee /etc/apt/sources.list.d/mono-official-stable.list
+sudo apt update
+sudo apt install mono-devel

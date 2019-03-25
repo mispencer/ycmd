@@ -1,7 +1,3 @@
-# For roslyn omnsharp
-export LD_LIBRARY_PATH="$HOME/libuvinstall/lib"
-export LIBRARY_PATH="$HOME/libuvinstall/lib"
-
 if [ "${YCM_BENCHMARK}" == "true" ]; then
   ./benchmark.py
 elif [ "${YCM_CLANG_TIDY}" == "true" ]; then
