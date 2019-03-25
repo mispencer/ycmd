@@ -1,6 +1,5 @@
-language: csharp
+language: generic
 dist: trusty
-mono: latest
 before_install:
   - git submodule update --init --recursive
 install:
