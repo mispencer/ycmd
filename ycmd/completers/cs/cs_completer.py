@@ -394,6 +394,7 @@ class CsharpSolutionCompleter( object ):
       shell_required = PY2 and utils.OnWindows()
 
       command = [ self._omnisharp_path,
+                  '-v',
                   '-p',
                   str( self._omnisharp_port ),
                   '-s',
