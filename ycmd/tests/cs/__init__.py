@@ -33,7 +33,7 @@ from ycmd.tests.test_utils import ( BuildRequest,
                                     IgnoreExtraConfOutsideTestsFolder,
                                     IsolatedApp,
                                     SetUpApp,
-                                    StartCompleterServer,
+                                    # StartCompleterServer,
                                     StopCompleterServer,
                                     WaitUntilCompleterServerReady )
 
@@ -96,10 +96,11 @@ def WrapOmniSharpServer( app, filepath ):
   global shared_log_indexes
 
   if filepath not in shared_filepaths:
-    StartCompleterServer( app, 'cs', filepath )
+    # StartCompleterServer( app, 'cs', filepath )
+    GetDiagnostics( app, filepath )
     shared_filepaths.append( filepath )
     WaitUntilCompleterServerReady( app, 'cs' )
-
+    time.sleep( 2 )
     # Omnisharp isn't ready when it says it is, so wait until Omnisharp returns
     # at least one diagnostic
     for i in range( 20 ):
