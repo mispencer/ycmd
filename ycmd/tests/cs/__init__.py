@@ -72,6 +72,17 @@ def GetDebugInfo( app, filepath ):
   return app.post_json( '/debug_info', request_data ).json
 
 
+def GetDiagnostics( app, filepath ):
+  contents, _ = ReadFile( filepath, 0 )
+
+  event_data = BuildRequest( filepath = filepath,
+                             event_name = 'FileReadyToParse',
+                             filetype = 'cs',
+                             contents = contents )
+
+  return app.post_json( '/event_notification', event_data ).json
+
+
 def ReadFile( filepath, fileposition ):
   with open( filepath, encoding = 'utf8' ) as f:
     if fileposition:
@@ -88,7 +99,21 @@ def WrapOmniSharpServer( app, filepath ):
     StartCompleterServer( app, 'cs', filepath )
     shared_filepaths.append( filepath )
     WaitUntilCompleterServerReady( app, 'cs' )
-    time.sleep( 5 )
+
+    # Omnisharp isn't ready when it says it is, so wait until Omnisharp returns
+    # at least one diagnostic
+    for i in range( 20 ):
+      try:
+        if len( GetDiagnostics( app, filepath ) ) > 0:
+          break
+      except Exception:
+        if i == 19: # i is zero indexed
+          raise
+        pass
+
+      time.sleep( 1 )
+    else:
+      raise Exception( "Never was ready" )
 
   logfiles = []
   response = GetDebugInfo( app, filepath )

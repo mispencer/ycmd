@@ -49,7 +49,7 @@ def Subcommands_GoTo_Basic_test( app ):
 
     goto_data = BuildRequest( completer_target = 'filetype_default',
                               command_arguments = [ 'GoTo' ],
-                              line_num = 9,
+                              line_num = 10,
                               column_num = 15,
                               contents = contents,
                               filetype = 'cs',
@@ -92,7 +92,7 @@ def Subcommands_GoToImplementation_Basic_test( app ):
     goto_data = BuildRequest(
       completer_target = 'filetype_default',
       command_arguments = [ 'GoToImplementation' ],
-      line_num = 13,
+      line_num = 14,
       column_num = 13,
       contents = contents,
       filetype = 'cs',
@@ -101,7 +101,7 @@ def Subcommands_GoToImplementation_Basic_test( app ):
 
     eq_( {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
-      'line_num': 30,
+      'line_num': 31,
       'column_num': 15
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
@@ -115,7 +115,7 @@ def Subcommands_GoToImplementation_NoImplementation_test( app ):
     goto_data = BuildRequest(
       completer_target = 'filetype_default',
       command_arguments = [ 'GoToImplementation' ],
-      line_num = 17,
+      line_num = 18,
       column_num = 13,
       contents = contents,
       filetype = 'cs',
@@ -142,7 +142,7 @@ def Subcommands_CsCompleter_InvalidLocation_test( app ):
     goto_data = BuildRequest(
       completer_target = 'filetype_default',
       command_arguments = [ 'GoToImplementation' ],
-      line_num = 2,
+      line_num = 3,
       column_num = 1,
       contents = contents,
       filetype = 'cs',
@@ -168,7 +168,7 @@ def Subcommands_GoToImplementationElseDeclaration_NoImplementation_test( app ):
     goto_data = BuildRequest(
       completer_target = 'filetype_default',
       command_arguments = [ 'GoToImplementationElseDeclaration' ],
-      line_num = 17,
+      line_num = 18,
       column_num = 13,
       contents = contents,
       filetype = 'cs',
@@ -177,7 +177,7 @@ def Subcommands_GoToImplementationElseDeclaration_NoImplementation_test( app ):
 
     eq_( {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
-      'line_num': 35,
+      'line_num': 36,
       'column_num': 8
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
@@ -192,7 +192,7 @@ def Subcommands_GoToImplementationElseDeclaration_SingleImplementation_test(
     goto_data = BuildRequest(
       completer_target = 'filetype_default',
       command_arguments = [ 'GoToImplementationElseDeclaration' ],
-      line_num = 13,
+      line_num = 14,
       column_num = 13,
       contents = contents,
       filetype = 'cs',
@@ -201,7 +201,7 @@ def Subcommands_GoToImplementationElseDeclaration_SingleImplementation_test(
 
     eq_( {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
-      'line_num': 30,
+      'line_num': 31,
       'column_num': 15
     }, app.post_json( '/run_completer_command', goto_data ).json )
 
@@ -216,7 +216,7 @@ def Subcommands_GoToImplementationElseDeclaration_MultipleImplementations_test(
     goto_data = BuildRequest(
       completer_target = 'filetype_default',
       command_arguments = [ 'GoToImplementationElseDeclaration' ],
-      line_num = 21,
+      line_num = 22,
       column_num = 13,
       contents = contents,
       filetype = 'cs',
@@ -225,11 +225,11 @@ def Subcommands_GoToImplementationElseDeclaration_MultipleImplementations_test(
 
     eq_( [ {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
-      'line_num': 43,
+      'line_num': 44,
       'column_num': 15
     }, {
       'filepath': PathToTestFile( 'testy', 'GotoTestCase.cs' ),
-      'line_num': 48,
+      'line_num': 49,
       'column_num': 15
     } ], app.post_json( '/run_completer_command', goto_data ).json )
 
@@ -288,7 +288,7 @@ def Subcommands_GetType_VariableDeclaration_test( app ):
 
     gettype_data = BuildRequest( completer_target = 'filetype_default',
                                  command_arguments = [ 'GetType' ],
-                                 line_num = 4,
+                                 line_num = 5,
                                  column_num = 5,
                                  contents = contents,
                                  filetype = 'cs',
@@ -307,7 +307,7 @@ def Subcommands_GetType_VariableUsage_test( app ):
 
     gettype_data = BuildRequest( completer_target = 'filetype_default',
                                  command_arguments = [ 'GetType' ],
-                                 line_num = 5,
+                                 line_num = 6,
                                  column_num = 5,
                                  contents = contents,
                                  filetype = 'cs',
@@ -327,7 +327,7 @@ def Subcommands_GetType_Constant_test( app ):
 
     gettype_data = BuildRequest( completer_target = 'filetype_default',
                                  command_arguments = [ 'GetType' ],
-                                 line_num = 4,
+                                 line_num = 5,
                                  column_num = 14,
                                  contents = contents,
                                  filetype = 'cs',
@@ -346,7 +346,7 @@ def Subcommands_GetType_DocsIgnored_test( app ):
 
     gettype_data = BuildRequest( completer_target = 'filetype_default',
                                  command_arguments = [ 'GetType' ],
-                                 line_num = 9,
+                                 line_num = 10,
                                  column_num = 34,
                                  contents = contents,
                                  filetype = 'cs',
@@ -413,7 +413,7 @@ def RunFixItTest( app,
                                line_num = line,
                                column_num = column,
                                contents = contents,
-                               filetype = 'cs',
+                               filetype = 'c3',
                                filepath = filepath )
 
     response = app.post_json( '/run_completer_command', fixit_data ).json
