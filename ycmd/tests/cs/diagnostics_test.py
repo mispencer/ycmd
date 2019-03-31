@@ -21,17 +21,14 @@ from __future__ import division
 from __future__ import absolute_import
 # Not installing aliases from python-future; it's unreliable and slow.
 from builtins import *  # noqa
-import time
-from nose import SkipTest
 
 from hamcrest import ( assert_that, contains, contains_string, equal_to,
                        has_entries, has_entry, has_items )
 
 from ycmd.tests.cs import ( IsolatedYcmd, PathToTestFile, SharedYcmd,
-                            WrapOmniSharpServer )
+                            WrapOmniSharpServer, WaitUntilCsCompleterIsReady )
 from ycmd.tests.test_utils import ( BuildRequest, LocationMatcher,
                                     RangeMatcher,
-                                    WaitUntilCompleterServerReady,
                                     StopCompleterServer )
 from ycmd.utils import ReadFile
 
@@ -138,36 +135,6 @@ def Diagnostics_MultipleSolution_test( app ):
       ) )
 
 
-@SharedYcmd
-def Diagnostics_HandleZeroColumnDiagnostic_test( app ):
-  raise SkipTest( "No zero column diagnostic in roslyn" )
-  filepath = PathToTestFile( 'testy', 'ZeroColumnDiagnostic.cs' )
-  with WrapOmniSharpServer( app, filepath ):
-    contents = ReadFile( filepath )
-
-    event_data = BuildRequest( filepath = filepath,
-                               event_name = 'FileReadyToParse',
-                               filetype = 'cs',
-                               contents = contents )
-
-    results = app.post_json( '/event_notification', event_data ).json
-
-    assert_that( results, contains(
-      has_entries( {
-        'kind': equal_to( 'ERROR' ),
-        'text': contains_string( "Unexpected symbol `}'', "
-                                 "expecting `;'', `{'', or `where''" ),
-        'location': LocationMatcher( filepath, 3, 1 ),
-        'location_extent': RangeMatcher( filepath, ( 3, 1 ), ( 3, 1 ) )
-      }, {
-        'kind': equal_to( 'ERROR' ),
-        'text': contains_string( "; expected" ),
-        'location': LocationMatcher( filepath, 10, 12 ),
-        'location_extent': RangeMatcher( filepath, ( 10, 12 ), ( 10, 12 ) ),
-      } )
-    ) )
-
-
 @IsolatedYcmd( { 'max_diagnostics_to_display': 1 } )
 def Diagnostics_MaximumDiagnosticsNumberExceeded_test( app ):
   filepath = PathToTestFile( 'testy', 'MaxDiagnostics.cs' )
@@ -179,8 +146,7 @@ def Diagnostics_MaximumDiagnosticsNumberExceeded_test( app ):
                              contents = contents )
 
   app.post_json( '/event_notification', event_data ).json
-  WaitUntilCompleterServerReady( app, 'cs' )
-  time.sleep( 5 )
+  WaitUntilCsCompleterIsReady( app, filepath )
 
   event_data = BuildRequest( filepath = filepath,
                              event_name = 'FileReadyToParse',

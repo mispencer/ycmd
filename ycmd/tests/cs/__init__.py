@@ -90,6 +90,23 @@ def ReadFile( filepath, fileposition ):
     return f.read(), f.tell()
 
 
+def WaitUntilCsCompleterIsReady( app, filepath ):
+  WaitUntilCompleterServerReady( app, 'cs' )
+  # Omnisharp isn't ready when it says it is, so wait until Omnisharp returns
+  # at least one diagnostic.
+  for reraise_error in [ False ] * 19 + [ True ]:
+    try:
+      if len( GetDiagnostics( app, filepath ) ) > 0:
+        break
+    except Exception:
+      if reraise_error:
+        raise
+
+    time.sleep( .5 )
+  else:
+    raise Exception( "Never was ready" )
+
+
 @contextmanager
 def WrapOmniSharpServer( app, filepath ):
   global shared_filepaths
@@ -99,20 +116,7 @@ def WrapOmniSharpServer( app, filepath ):
     # StartCompleterServer( app, 'cs', filepath )
     GetDiagnostics( app, filepath )
     shared_filepaths.append( filepath )
-    WaitUntilCompleterServerReady( app, 'cs' )
-    # Omnisharp isn't ready when it says it is, so wait until Omnisharp returns
-    # at least one diagnostic.
-    for reraise_error in [ False ] * 19 + [ True ]:
-      try:
-        if len( GetDiagnostics( app, filepath ) ) > 0:
-          break
-      except Exception:
-        if reraise_error:
-          raise
-
-      time.sleep( .5 )
-    else:
-      raise Exception( "Never was ready" )
+    WaitUntilCsCompleterIsReady( app, filepath )
 
   logfiles = []
   response = GetDebugInfo( app, filepath )
