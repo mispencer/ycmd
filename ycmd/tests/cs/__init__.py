@@ -100,19 +100,17 @@ def WrapOmniSharpServer( app, filepath ):
     GetDiagnostics( app, filepath )
     shared_filepaths.append( filepath )
     WaitUntilCompleterServerReady( app, 'cs' )
-    time.sleep( 2 )
     # Omnisharp isn't ready when it says it is, so wait until Omnisharp returns
-    # at least one diagnostic
-    for i in range( 20 ):
+    # at least one diagnostic.
+    for reraise_error in [ False ] * 19 + [ True ]:
       try:
         if len( GetDiagnostics( app, filepath ) ) > 0:
           break
       except Exception:
-        if i == 19: # i is zero indexed
+        if reraise_error:
           raise
-        pass
 
-      time.sleep( 1 )
+      time.sleep( .5 )
     else:
       raise Exception( "Never was ready" )
 
