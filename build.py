@@ -668,9 +668,14 @@ def EnableCsCompleter( args ):
       pass
     os.chdir( build_dir )
 
-    url_pattern = ( "https://github.com/OmniSharp/omnisharp-roslyn/"
-                    "releases/download/{0}/{1}" )
-    version = "v1.32.1"
+    release_url_pattern = ( "https://github.com/OmniSharp/omnisharp-roslyn/"
+                            "releases/download/{0}/{1}" )
+    prerelease_url_pattern = ( "https://roslynomnisharp.blob.core.windows.net/"
+                               "releases/{0}/{1}" )
+    version = "1.32.12-beta.51"
+    is_prerelease = "-" in version
+    url_pattern = ( prerelease_url_pattern if is_prerelease
+                    else release_url_pattern )
     url_file = GetCsCompleterFileNameForPlatform()
 
     CleanCsCompleter( build_dir, version )
