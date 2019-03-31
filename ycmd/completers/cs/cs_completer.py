@@ -66,11 +66,10 @@ class CsharpCompleter( Completer ):
     self._completer_per_solution = {}
     self._diagnostic_store = None
     self._solution_state_lock = threading.Lock()
-    self._omnisharp_path = PATH_TO_ROSLYN_OMNISHARP_BINARY
 
-    if not os.path.isfile( self._omnisharp_path ):
+    if not os.path.isfile( PATH_TO_ROSLYN_OMNISHARP_BINARY ):
       raise RuntimeError(
-           SERVER_NOT_FOUND_MSG.format( self._omnisharp_path ) )
+           SERVER_NOT_FOUND_MSG.format( PATH_TO_ROSLYN_OMNISHARP_BINARY ) )
 
 
   def Shutdown( self ):
@@ -94,8 +93,7 @@ class CsharpCompleter( Completer ):
       if solution not in self._completer_per_solution:
         keep_logfiles = self.user_options[ 'server_keep_logfiles' ]
         desired_omnisharp_port = self.user_options.get( 'csharp_server_port' )
-        completer = CsharpSolutionCompleter( self._omnisharp_path,
-                                             solution,
+        completer = CsharpSolutionCompleter( solution,
                                              keep_logfiles,
                                              desired_omnisharp_port )
         self._completer_per_solution[ solution ] = completer
@@ -108,7 +106,7 @@ class CsharpCompleter( Completer ):
     enough to do so and it will returns more relevant results. Fallback to use
     the triggers, which are by default . -> and :: """
     return ( self.QueryLengthAboveMinThreshold( request_data ) or
-      super( CsharpCompleter, self ).ShouldUseNowInner( request_data ) )
+             super( CsharpCompleter, self ).ShouldUseNowInner( request_data ) )
 
 
   def ComputeCandidatesInner( self, request_data ):
@@ -181,8 +179,6 @@ class CsharpCompleter( Completer ):
       'GetDoc'                           : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_GetDoc' ) ),
-      # 'SetOmnisharpPath'                 : ( lambda self, request_data, args:
-      #    self._SetOmnisharpPath( request_data, args[ 0 ] ) ),
     }
 
 
@@ -278,7 +274,7 @@ class CsharpCompleter( Completer ):
       omnisharp_server = responses.DebugInfoServer(
         name = 'OmniSharp',
         handle = None,
-        executable = self._omnisharp_path )
+        executable = PATH_TO_ROSLYN_OMNISHARP_BINARY )
 
       return responses.BuildDebugInfoResponse( name = 'C#',
                                                servers = [ omnisharp_server ] )
@@ -291,7 +287,7 @@ class CsharpCompleter( Completer ):
       omnisharp_server = responses.DebugInfoServer(
         name = 'OmniSharp',
         handle = completer._omnisharp_phandle,
-        executable = completer._omnisharp_path,
+        executable = PATH_TO_ROSLYN_OMNISHARP,
         address = 'localhost',
         port = completer._omnisharp_port,
         logfiles = [ completer._filename_stdout, completer._filename_stderr ],
@@ -317,21 +313,6 @@ class CsharpCompleter( Completer ):
                 if completer._ServerIsRunning() )
 
 
-  def _SetOmnisharpPath( self, request_data, omnisharp_path ):
-    if self._omnisharp_path == omnisharp_path:
-      return
-    self._omnisharp_path = omnisharp_path
-
-    if not os.path.isfile( self._omnisharp_path ):
-      raise RuntimeError(
-           SERVER_NOT_FOUND_MSG.format( self._omnisharp_path ) )
-
-    solution = self._GetSolutionFile( request_data[ "filepath" ] )
-    if solution in self._completer_per_solution:
-      self._completer_per_solution[ solution ]._StopServer()
-      del self._completer_per_solution[ solution ]
-
-
   def _GetSolutionFile( self, filepath ):
     if filepath not in self._solution_for_file:
       # NOTE: detection could throw an exception if an extra_conf_store needs
@@ -345,9 +326,7 @@ class CsharpCompleter( Completer ):
 
 
 class CsharpSolutionCompleter( object ):
-  def __init__( self, omnisharp_path, solution_path, keep_logfiles,
-                desired_omnisharp_port ):
-    self._omnisharp_path = omnisharp_path
+  def __init__( self, solution_path, keep_logfiles, desired_omnisharp_port ):
     self._solution_path = solution_path
     self._keep_logfiles = keep_logfiles
     self._filename_stderr = None
@@ -383,13 +362,14 @@ class CsharpSolutionCompleter( object ):
       # Shell isn't preferred, but I don't see any other way to resolve
       shell_required = PY2 and utils.OnWindows()
 
-      command = [ self._omnisharp_path,
+      command = [ PATH_TO_ROSLYN_OMNISHARP_BINARY,
                   '-p',
                   str( self._omnisharp_port ),
                   '-s',
                   u'{0}'.format( self._solution_path ) ]
 
-      if ( not utils.OnWindows() and self._omnisharp_path.endswith( '.exe' ) ):
+      if ( not utils.OnWindows()
+           and PATH_TO_ROSLYN_OMNISHARP_BINARY.endswith( '.exe' ) ):
         command.insert( 0, 'mono' )
 
       LOGGER.info( 'Starting OmniSharp server with: ' + str( command ) )
