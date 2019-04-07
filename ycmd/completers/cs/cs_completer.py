@@ -133,6 +133,7 @@ class CsharpCompleter( Completer ):
          self._SolutionSubcommand( request_data,
                                    method = '_RestartServer',
                                    no_request_data = True ) ),
+      # TODO: Add back when/if Omnisharp supports this properly
       # 'ReloadSolution'                   : ( lambda self, request_data, args:
       #    self._SolutionSubcommand( request_data,
       #                              method = '_ReloadSolution',
@@ -527,6 +528,7 @@ class CsharpSolutionCompleter( object ):
     return responses.BuildDisplayMessageResponse( message )
 
 
+  # To be re-enabled after FixIt support is added to Omnisharp
   # def _FixIt( self, request_data ):
   #   request = self._DefaultParameters( request_data )
 
@@ -634,68 +636,69 @@ def DiagnosticsToDiagStructure( diagnostics ):
   return structure
 
 
-def _BuildChunks( request_data, new_buffer ):
-  filepath = request_data[ 'filepath' ]
-  old_buffer = request_data[ 'file_data' ][ filepath ][ 'contents' ]
-  new_buffer = _FixLineEndings( old_buffer, new_buffer )
+# To be re-enabled after FixIt support is added to Omnisharp
+# def _BuildChunks( request_data, new_buffer ):
+#   filepath = request_data[ 'filepath' ]
+#   old_buffer = request_data[ 'file_data' ][ filepath ][ 'contents' ]
+#   new_buffer = _FixLineEndings( old_buffer, new_buffer )
+# 
+#   new_length = len( new_buffer )
+#   old_length = len( old_buffer )
+#   if new_length == old_length and new_buffer == old_buffer:
+#     return []
+#   min_length = min( new_length, old_length )
+#   start_index = 0
+#   end_index = min_length
+#   for i in range( 0, min_length - 1 ):
+#     if new_buffer[ i ] != old_buffer[ i ]:
+#       start_index = i
+#       break
+#   for i in range( 1, min_length ):
+#     if new_buffer[ new_length - i ] != old_buffer[ old_length - i ]:
+#       end_index = i - 1
+#       break
+#   # To handle duplicates, i.e aba => a
+#   if ( start_index + end_index > min_length ):
+#     start_index -= start_index + end_index - min_length
+# 
+#   replacement_text = new_buffer[ start_index : new_length - end_index ]
+# 
+#   ( start_line, start_column ) = _IndexToLineColumn( old_buffer, start_index )
+#   ( end_line, end_column ) = _IndexToLineColumn( old_buffer,
+#                                                  old_length - end_index )
+# 
+#   # No need for _BuildLocation, because _IndexToLineColumn already converted
+#   # start_column and end_column to byte offsets for us.
+#   start = responses.Location( start_line, start_column, filepath )
+#   end = responses.Location( end_line, end_column, filepath )
+#   return [ responses.FixItChunk( replacement_text,
+#                                  responses.Range( start, end ) ) ]
+#
+#
+# def _FixLineEndings( old_buffer, new_buffer ):
+#   new_windows = "\r\n" in new_buffer
+#   old_windows = "\r\n" in old_buffer
+#   if new_windows != old_windows:
+#     if new_windows:
+#       new_buffer = new_buffer.replace( "\r\n", "\n" )
+#       new_buffer = new_buffer.replace( "\r", "\n" )
+#     else:
+#       new_buffer = re.sub( "\r(?!\n)|(?<!\r)\n", "\r\n", new_buffer )
+#   return new_buffer
 
-  new_length = len( new_buffer )
-  old_length = len( old_buffer )
-  if new_length == old_length and new_buffer == old_buffer:
-    return []
-  min_length = min( new_length, old_length )
-  start_index = 0
-  end_index = min_length
-  for i in range( 0, min_length - 1 ):
-    if new_buffer[ i ] != old_buffer[ i ]:
-      start_index = i
-      break
-  for i in range( 1, min_length ):
-    if new_buffer[ new_length - i ] != old_buffer[ old_length - i ]:
-      end_index = i - 1
-      break
-  # To handle duplicates, i.e aba => a
-  if ( start_index + end_index > min_length ):
-    start_index -= start_index + end_index - min_length
 
-  replacement_text = new_buffer[ start_index : new_length - end_index ]
-
-  ( start_line, start_column ) = _IndexToLineColumn( old_buffer, start_index )
-  ( end_line, end_column ) = _IndexToLineColumn( old_buffer,
-                                                 old_length - end_index )
-
-  # No need for _BuildLocation, because _IndexToLineColumn already converted
-  # start_column and end_column to byte offsets for us.
-  start = responses.Location( start_line, start_column, filepath )
-  end = responses.Location( end_line, end_column, filepath )
-  return [ responses.FixItChunk( replacement_text,
-                                 responses.Range( start, end ) ) ]
-
-
-def _FixLineEndings( old_buffer, new_buffer ):
-  new_windows = "\r\n" in new_buffer
-  old_windows = "\r\n" in old_buffer
-  if new_windows != old_windows:
-    if new_windows:
-      new_buffer = new_buffer.replace( "\r\n", "\n" )
-      new_buffer = new_buffer.replace( "\r", "\n" )
-    else:
-      new_buffer = re.sub( "\r(?!\n)|(?<!\r)\n", "\r\n", new_buffer )
-  return new_buffer
-
-
-# Adapted from http://stackoverflow.com/a/24495900
-def _IndexToLineColumn( text, index ):
-  """Get 1-based (line_number, col) of `index` in `string`, where string is a
-  unicode string and col is a byte offset."""
-  lines = text.splitlines( True )
-  curr_pos = 0
-  for linenum, line in enumerate( lines ):
-    if curr_pos + len( line ) > index:
-      return ( linenum + 1,
-               CodepointOffsetToByteOffset( line, index - curr_pos + 1 ) )
-    curr_pos += len( line )
-  assert False
+# # Adapted from http://stackoverflow.com/a/24495900
+# def _IndexToLineColumn( text, index ):
+#   """Get 1-based (line_number, col) of `index` in `string`, where string is a
+#   unicode string and col is a byte offset."""
+#   lines = text.splitlines( True )
+#   curr_pos = 0
+#   for linenum, line in enumerate( lines ):
+#     if curr_pos + len( line ) > index:
+#       return ( linenum + 1,
+#                CodepointOffsetToByteOffset( line, index - curr_pos + 1 ) )
+#     curr_pos += len( line )
+#   assert False
 
 
 def _BuildLocation( request_data, filename, line_num, column_num ):
