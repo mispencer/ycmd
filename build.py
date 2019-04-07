@@ -677,8 +677,12 @@ def EnableCsCompleter( args ):
     if not p.exists( package_path ):
       DownloadFileTo( url_pattern.format( version, url_file ), package_path )
 
-    with ZipFile( package_path, 'r' ) as packagezip:
-      packagezip.extractall()
+    if OnWindows():
+      with ZipFile( package_path, 'r' ) as package_zip:
+        package_zip.extractall()
+    else:
+      with tarfile.open( package_path ) as package_tar:
+        package_tar.extractall()
   finally:
     os.chdir( DIR_OF_THIS_SCRIPT )
 
