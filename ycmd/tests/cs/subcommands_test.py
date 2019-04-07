@@ -319,26 +319,6 @@ def Subcommands_GetType_VariableUsage_test( app ):
 
 
 @SharedYcmd
-def Subcommands_GetType_Constant_test( app ):
-  raise SkipTest( "No support for constant type in rosyln?" )
-  filepath = PathToTestFile( 'testy', 'GetTypeTestCase.cs' )
-  with WrapOmniSharpServer( app, filepath ):
-    contents = ReadFile( filepath )
-
-    gettype_data = BuildRequest( completer_target = 'filetype_default',
-                                 command_arguments = [ 'GetType' ],
-                                 line_num = 5,
-                                 column_num = 14,
-                                 contents = contents,
-                                 filetype = 'cs',
-                                 filepath = filepath )
-
-    eq_( {
-      u'message': u"System.String"
-    }, app.post_json( '/run_completer_command', gettype_data ).json )
-
-
-@SharedYcmd
 def Subcommands_GetType_DocsIgnored_test( app ):
   filepath = PathToTestFile( 'testy', 'GetTypeTestCase.cs' )
   with WrapOmniSharpServer( app, filepath ):
