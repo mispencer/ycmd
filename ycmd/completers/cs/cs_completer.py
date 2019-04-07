@@ -123,13 +123,6 @@ class CsharpCompleter( Completer ):
              in solutioncompleter._GetCompletions( request_data ) ]
 
 
-  def FilterAndSortCandidates( self, candidates, query ):
-    result = super( CsharpCompleter, self ).FilterAndSortCandidates( candidates,
-                                                                     query )
-    result.sort( key = _CompleteIsFromImport )
-    return result
-
-
   def GetSubcommandsMap( self ):
     return {
       'StopServer'                       : ( lambda self, request_data, args:
@@ -632,13 +625,6 @@ class CsharpSolutionCompleter( object ):
       else:
         self._omnisharp_port = utils.GetUnusedLocalhostPort()
     LOGGER.info( 'using port %s', self._omnisharp_port )
-
-
-def _CompleteIsFromImport( candidate ):
-  try:
-    return candidate[ "extra_data" ][ "required_namespace_import" ] is not None
-  except ( KeyError, TypeError ):
-    return False
 
 
 def DiagnosticsToDiagStructure( diagnostics ):
