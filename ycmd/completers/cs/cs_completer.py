@@ -33,7 +33,7 @@ import threading
 from ycmd.completers.completer import Completer
 from ycmd.completers.completer_utils import GetFileLines
 from ycmd.completers.cs import solutiondetection
-from ycmd.utils import CodepointOffsetToByteOffset, LOGGER, re, urljoin
+from ycmd.utils import CodepointOffsetToByteOffset, LOGGER, urljoin
 from ycmd import responses
 from ycmd import utils
 
@@ -641,7 +641,7 @@ def DiagnosticsToDiagStructure( diagnostics ):
 #   filepath = request_data[ 'filepath' ]
 #   old_buffer = request_data[ 'file_data' ][ filepath ][ 'contents' ]
 #   new_buffer = _FixLineEndings( old_buffer, new_buffer )
-# 
+#
 #   new_length = len( new_buffer )
 #   old_length = len( old_buffer )
 #   if new_length == old_length and new_buffer == old_buffer:
@@ -660,13 +660,13 @@ def DiagnosticsToDiagStructure( diagnostics ):
 #   # To handle duplicates, i.e aba => a
 #   if ( start_index + end_index > min_length ):
 #     start_index -= start_index + end_index - min_length
-# 
+#
 #   replacement_text = new_buffer[ start_index : new_length - end_index ]
-# 
+#
 #   ( start_line, start_column ) = _IndexToLineColumn( old_buffer, start_index )
 #   ( end_line, end_column ) = _IndexToLineColumn( old_buffer,
 #                                                  old_length - end_index )
-# 
+#
 #   # No need for _BuildLocation, because _IndexToLineColumn already converted
 #   # start_column and end_column to byte offsets for us.
 #   start = responses.Location( start_line, start_column, filepath )
