@@ -490,9 +490,12 @@ class CsharpSolutionCompleter( object ):
 
   def _GoToImplementation( self, request_data, fallback_to_declaration ):
     """ Jump to implementation of identifier under cursor """
-    implementation = self._GetResponse(
-        '/findimplementations',
-        self._DefaultParameters( request_data ) )
+    try:
+      implementation = self._GetResponse(
+          '/findimplementations',
+          self._DefaultParameters( request_data ) )
+    except ValueError:
+      implementation = { 'QuickFixes': None }
 
     if implementation[ 'QuickFixes' ]:
       if len( implementation[ 'QuickFixes' ] ) == 1:

@@ -134,7 +134,6 @@ def Subcommands_GoToImplementation_NoImplementation_test( app ):
 
 @SharedYcmd
 def Subcommands_CsCompleter_InvalidLocation_test( app ):
-  raise SkipTest( "TODO" )
   filepath = PathToTestFile( 'testy', 'GotoTestCase.cs' )
   with WrapOmniSharpServer( app, filepath ):
     contents = ReadFile( filepath )
