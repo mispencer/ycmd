@@ -98,18 +98,18 @@ def WaitUntilCsCompleterIsReady( app, filepath ):
   for reraise_error in [ False ] * 39 + [ True ]:
     try:
       if len( GetDiagnostics( app, filepath ) ) == 0:
-        raise Exception( "No diagnostic" )
+        raise RuntimeError( "No diagnostic" )
       success_count += 1
       if success_count > 2:
         break
-    except Exception:
+    except RuntimeError:
       success_count = 0
       if reraise_error:
         raise
 
     time.sleep( .5 )
   else:
-    raise Exception( "Never was ready" )
+    raise RuntimeError( "Never was ready" )
 
 
 @contextmanager
