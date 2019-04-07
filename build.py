@@ -660,7 +660,7 @@ def EnableCsCompleter( args ):
                             "releases/download/{0}/{1}" )
     nonrelease_url_pattern = ( "https://roslynomnisharp.blob.core.windows.net/"
                                "releases/{0}/{1}" )
-    version = "1.32.12-beta.51"
+    version = "v1.32.13"
     is_nonrelease = "-" in version
     url_pattern = ( nonrelease_url_pattern if is_nonrelease
                     else release_url_pattern )
