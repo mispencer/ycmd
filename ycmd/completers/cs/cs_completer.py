@@ -116,9 +116,7 @@ class CsharpCompleter( Completer ):
                 completion[ 'DisplayText' ],
                 completion[ 'Description' ],
                 None,
-                None,
-                { "required_namespace_import" :
-                   completion[ 'RequiredNamespaceImport' ] } )
+                completion[ 'Kind' ] )
              for completion
              in solutioncompleter._GetCompletions( request_data ) ]
 
@@ -466,8 +464,9 @@ class CsharpSolutionCompleter( object ):
   def _GetCompletions( self, request_data ):
     """ Ask server for completions """
     parameters = self._DefaultParameters( request_data )
-    parameters[ 'WantImportableTypes' ] = request_data[ 'force_semantic' ]
-    parameters[ 'ForceSemanticCompletion' ] = request_data[ 'force_semantic' ]
+    parameters[ 'WantSnippet' ] = False
+    parameters[ 'WantKind' ] = True
+    parameters[ 'WantReturnType' ] = False
     parameters[ 'WantDocumentationForEveryCompletionResult' ] = True
     completions = self._GetResponse( '/autocomplete', parameters )
     return completions if completions is not None else []
@@ -618,7 +617,7 @@ class CsharpSolutionCompleter( object ):
     target = urljoin( self._ServerLocation(), handler )
     LOGGER.info( u'Sending request' )
     response = requests.post( target, json = parameters, timeout = timeout )
-    LOGGER.info( u'Received response request' )
+    LOGGER.info( u'Received response' )
     return response.json()
 
 
