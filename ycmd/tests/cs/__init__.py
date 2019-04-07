@@ -102,7 +102,7 @@ def WaitUntilCsCompleterIsReady( app, filepath ):
       success_count += 1
       if success_count > 2:
         break
-    except RuntimeError:
+    except Exception:
       success_count = 0
       if reraise_error:
         raise
