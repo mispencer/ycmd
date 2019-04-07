@@ -23,6 +23,7 @@ import subprocess
 import sys
 import sysconfig
 import tarfile
+from zipfile import ZipFile
 import tempfile
 
 IS_64BIT = sys.maxsize > 2**32
@@ -259,19 +260,6 @@ def GetGlobalPythonPrefix():
   if PY_MAJOR >= 3:
     return sys.base_prefix
   return sys.prefix
-
-
-def CheckOutput( args, **kwargs ):
-  exit_message = kwargs.get( 'exit_message', None )
-  kwargs.pop( 'exit_message', None )
-  kwargs.setdefault( 'stdout', subprocess.PIPE )
-  try:
-    proc = subprocess.Popen( args, **kwargs )
-    return proc.communicate()[ 0 ]
-  except subprocess.CalledProcessError as error:
-    if exit_message:
-      sys.exit( exit_message )
-    sys.exit( error.returncode )
 
 
 def GetPossiblePythonLibraryDirectories():
@@ -670,11 +658,11 @@ def EnableCsCompleter( args ):
 
     release_url_pattern = ( "https://github.com/OmniSharp/omnisharp-roslyn/"
                             "releases/download/{0}/{1}" )
-    prerelease_url_pattern = ( "https://roslynomnisharp.blob.core.windows.net/"
+    nonrelease_url_pattern = ( "https://roslynomnisharp.blob.core.windows.net/"
                                "releases/{0}/{1}" )
     version = "1.32.12-beta.51"
-    is_prerelease = "-" in version
-    url_pattern = ( prerelease_url_pattern if is_prerelease
+    is_nonrelease = "-" in version
+    url_pattern = ( nonrelease_url_pattern if is_nonrelease
                     else release_url_pattern )
     url_file = GetCsCompleterFileNameForPlatform()
 
@@ -689,12 +677,8 @@ def EnableCsCompleter( args ):
     if not p.exists( package_path ):
       DownloadFileTo( url_pattern.format( version, url_file ), package_path )
 
-    if OnWindows():
-      extract_command = [ GetSevenZipPath(), 'x', package_path ]
-    else:
-      extract_command = [ 'tar', 'xfv', package_path ]
-
-    subprocess.check_call( extract_command )
+    with ZipFile( package_path, 'r' ) as packagezip:
+      packagezip.extractall()
   finally:
     os.chdir( DIR_OF_THIS_SCRIPT )
 
@@ -711,64 +695,18 @@ def CleanCsCompleter( build_dir, version ):
       shutil.rmtree( file_path )
 
 
-def GetSevenZipPath():
-  try:
-    import _winreg
-  except ImportError:
-    import winreg as _winreg
-
-  wow64 = _winreg.KEY_READ | _winreg.KEY_WOW64_64KEY
-  with _winreg.ConnectRegistry( None, _winreg.HKEY_LOCAL_MACHINE ) as LM:
-    with _winreg.OpenKey( LM, 'SOFTWARE', 0, wow64 ) as S:
-      with _winreg.OpenKey( S, '7-Zip', 0, wow64 ) as SZ:
-        seven_zip_path = _winreg.QueryValueEx( SZ, 'Path' )[ 0 ]
-        return p.join( seven_zip_path, '7z.exe' )
-
-
-USE_MONO_PACKAGE = False
-
-
 def GetCsCompleterFileNameForPlatform():
   if OnWindows():
-    dotnetversion_output = CheckOutput( [ 'reg', 'query',
-      'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\NET Framework Setup'
-      '\\NDP\\v4\\full',
-      '/v', 'version' ] )
-    dotnet_46_pattern = re.compile( 'version\\s*REG_SZ\\s*4.[67].\\d*' )
-
-    if ( dotnet_46_pattern.search( ToUnicode( dotnetversion_output ) ) ):
-      if platform.machine().endswith( '64' ):
-        return 'omnisharp.http-win-x64.zip'
-      else:
-        return 'omnisharp.http-win-x86.zip'
+    if IS_64BIT:
+      return 'omnisharp.http-win-x64.zip'
     else:
-      sys.exit( 'ERROR: .NET 4.6 or .NET 4.7'
-                ' is required to set up Roslyn Omnisharp.' )
+      return 'omnisharp.http-win-x86.zip'
   else:
-    # TODO - improve this check
-    libuv_output = CheckOutput(
-      [ 'gcc', '-luv' ], stderr = subprocess.STDOUT )
-    if 'library not found for -luv' in ToUnicode( libuv_output ):
-      sys.exit( 'ERROR: libuv is required to set up Roslyn Omnisharp.' )
-    if USE_MONO_PACKAGE and FindExecutable( 'mono' ): # TODO: min version?
-      return 'omnisharp.http-mono.tar.gz'
-    else:
-      if OnMac():
-        return 'omnisharp.http-osx.tar.gz'
-      if platform.machine().endswith( '64' ):
-        return 'omnisharp.http-linux-x64.tar.gz'
-      return 'omnisharp.http-linux-x86.tar.gz'
-
-
-def ToUnicode( value ):
-  if not value:
-    return str()
-  if isinstance( value, str ):
-    return value
-  if isinstance( value, bytes ):
-    # All incoming text should be utf8
-    return str( value, 'utf8' )
-  return str( value )
+    if OnMac():
+      return 'omnisharp.http-osx.tar.gz'
+    if IS_64BIT:
+      return 'omnisharp.http-linux-x64.tar.gz'
+    return 'omnisharp.http-linux-x86.tar.gz'
 
 
 def EnableGoCompleter( args ):
