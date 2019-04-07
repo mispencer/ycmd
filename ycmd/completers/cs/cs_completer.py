@@ -395,7 +395,6 @@ class CsharpSolutionCompleter( object ):
         try:
           self._TryToStopServer()
           self._ForceStopServer()
-          self._GetResponse( '/stopserver' )
           utils.WaitUntilProcessIsTerminated( self._omnisharp_phandle,
                                               timeout = 5 )
           LOGGER.info( 'OmniSharp server stopped' )
