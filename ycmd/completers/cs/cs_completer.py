@@ -164,10 +164,13 @@ class CsharpCompleter( Completer ):
       'GetType'                          : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_GetType' ) ),
-      # To be re-enabled after FixIt support is added to Omnisharp
-      # 'FixIt'                            : ( lambda self, request_data, args:
-      #    self._SolutionSubcommand( request_data,
-      #                              method = '_FixIt' ) ),
+      'GetCodeActions'                  : ( lambda self, request_data, args:
+         self._SolutionSubcommand( request_data,
+                                   method = '_GetCodeActions' ) ),
+      'RunCodeAction'                   : ( lambda self, request_data, args:
+         self._SolutionSubcommand( request_data,
+                                   method = '_RunCodeAction',
+                                   args = args ) ),
       'GetDoc'                           : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_GetDoc' ) ),
@@ -530,23 +533,101 @@ class CsharpSolutionCompleter( object ):
     return responses.BuildDisplayMessageResponse( message )
 
 
-  # To be re-enabled after FixIt support is added to Omnisharp
-  # def _FixIt( self, request_data ):
-  #   request = self._DefaultParameters( request_data )
+  def _GetCodeActions( self, request_data ):
+    request = self._DefaultParameters( request_data )
+    request[ "Selection" ] = {
+      "Start": {
+        "Line": request_data["line_num"],
+        "Column": request_data[ 'column_num']
+      },
+      "End": {
+        "Line": request_data["line_num"],
+        "Column": request_data[ 'column_num']
+      }
+    }
 
-  #   result = self._GetResponse( '/fixcodeissue', request )
-  #   replacement_text = result[ "Text" ]
-  #   # Note: column_num is already a byte offset so we don't need to use
-  #   # _BuildLocation.
-  #   filepath = request_data[ 'filepath' ]
-  #   location = responses.Location( request_data[ 'line_num' ],
-  #                                  request_data[ 'column_num' ],
-  #                                  filepath )
-  #   fixits = [ responses.FixIt( location,
-  #                               _BuildChunks( request_data,
-  #                                             replacement_text ) ) ]
+    result = self._GetResponse( '/v2/getcodeactions', request )
 
-  #   return responses.BuildFixItResponse( fixits )
+    text = "Available Code Actions:"
+    for action in result[ 'CodeActions' ]:
+      text = text + "\n {} ({})".format(action[ "Name" ], action[ "Identifier" ] )
+    else:
+      text = "No Code Actions Available"
+
+    return responses.BuildDisplayMessageResponse( text )
+
+  def _RunCodeAction( self, request_data, args ):
+    action = args[ 0 ]
+    request = self._DefaultParameters( request_data )
+    request[ "Selection" ] = {
+      "Start": {
+        "Line": request_data["line_num"],
+        "Column": request_data[ 'column_num']
+      },
+      "End": {
+        "Line": request_data["line_num"],
+        "Column": request_data[ 'column_num']
+      }
+    }
+    request[ "Identifier" ] = action
+    request[ "WantsTextChanges" ] = True
+    request[ "ApplyTextChanges" ] = False
+    request[ "WantsAllCodeActions" ] = True
+
+    result = self._GetResponse( '/v2/runcodeaction', request )
+    clunks = []
+    for file_operation in result[ 'Changes' ]:
+      if file_operation[ 'Type' ] == 'Modified':
+        filename = file_operation[ 'FileName' ]
+        for change in file_operation[ 'Changes' ]:
+          clunk = {
+            'replacement_text': change[ 'NewText' ],
+            'range': {
+              'start': {
+                'filename': filename,
+                'line': change[ 'StartLine' ],
+                'column': change[ 'StartColumn' ]
+              },
+              'end': {
+                'filename': filename,
+                'line': change[ 'EndLine' ],
+                'column': change[ 'EndColumn' ]
+              }
+            }
+          }
+          clunks.push( clunk )
+      elif file_operation[ 'Type' ] == 'Opened':
+        pass
+      elif file_operation[ 'Type' ] == 'Renamed':
+        pass
+
+    return {
+      'fixits': [
+        {
+          'location': {
+            'filename': request_data[ 'filepath' ],
+            'line': request_data[ 'line_num' ],
+            'column': request_data[ 'column_num' ]
+          },
+          'clunks': clunks,
+          'text': action
+        }
+      ]
+    }
+
+
+    # replacement_text = result[ "Text" ]
+    # # Note: column_num is already a byte offset so we don't need to use
+    # # _BuildLocation.
+    # filepath = request_data[ 'filepath' ]
+    # location = responses.Location( request_data[ 'line_num' ],
+    #                                request_data[ 'column_num' ],
+    #                                filepath )
+    # fixits = [ responses.FixIt( location,
+    #                             _BuildChunks( request_data,
+    #                                           replacement_text ) ) ]
+
+    #return responses.BuildFixItResponse( fixits )
 
 
   def _GetDoc( self, request_data ):
