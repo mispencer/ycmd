@@ -556,6 +556,51 @@ def Subcommands_StopServer_DoNotKeepLogFiles_test( app ):
 
 
 @IsolatedYcmd()
+def Subcommands_RestartServer_PidChanges_test( app ):
+  filepath = PathToTestFile( 'testy', 'GotoTestCase.cs' )
+  contents = ReadFile( filepath )
+  event_data = BuildRequest( filepath = filepath,
+                             filetype = 'cs',
+                             contents = contents,
+                             event_name = 'FileReadyToParse' )
+
+  app.post_json( '/event_notification', event_data )
+
+  try:
+    WaitUntilCompleterServerReady( app, 'cs' )
+
+    def GetPid():
+      request_data = BuildRequest( filetype = 'cs', filepath = filepath )
+      debug_info = app.post_json( '/debug_info', request_data ).json
+      return debug_info[ "completer" ][ "servers" ][ 0 ][ "pid" ]
+
+    old_pid = GetPid()
+
+    app.post_json(
+      '/run_completer_command',
+      BuildRequest(
+        filetype = 'cs',
+        filepath = filepath,
+        command_arguments = [ 'RestartServer' ]
+      )
+    )
+    WaitUntilCompleterServerReady( app, 'cs' )
+
+    new_pid = GetPid()
+
+    assert old_pid != new_pid, '%r == %r' % ( old_pid, new_pid )
+  finally:
+    app.post_json(
+      '/run_completer_command',
+      BuildRequest(
+        filetype = 'cs',
+        filepath = filepath,
+        command_arguments = [ 'StopServer' ]
+      )
+    )
+
+
+@IsolatedYcmd()
 @patch( 'ycmd.utils.WaitUntilProcessIsTerminated',
         MockProcessTerminationTimingOut )
 def Subcommands_StopServer_Timeout_test( app ):
