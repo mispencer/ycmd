@@ -27,13 +27,14 @@ def GetStandardLibraryIndexInSysPath():
 def AddRequestDependencies():
   request_dep_root = p.abspath( p.join( DIR_OF_THIRD_PARTY,
                                         'requests_deps' ) )
-  for path in listdir( request_dep_root  ):
+  for path in listdir( request_dep_root ):
     sys.path.insert( 0, p.join( request_dep_root, path ) )
 
   sys.path.insert( 0, p.abspath( p.join( DIR_OF_THIRD_PARTY,
                                          'requests_deps',
                                          'urllib3',
                                          'src' ) ) )
+
 
 sys.path.insert( GetStandardLibraryIndexInSysPath() + 1,
                  p.abspath( p.join( DIR_OF_THIRD_PARTY, 'python-future',

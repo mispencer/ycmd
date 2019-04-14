@@ -750,11 +750,11 @@ def GetCsCompleterDataForPlatform():
     },
   }
   if OnWindows():
-      return DATA['win64' if IS_64BIT else 'win32']
+    return DATA[ 'win64' if IS_64BIT else 'win32' ]
   else:
     if OnMac():
-      return DATA['macos']
-    return DATA['linux64' if IS_64BIT else 'linux32']
+      return DATA[ 'macos' ]
+    return DATA[ 'linux64' if IS_64BIT else 'linux32' ]
 
 
 def EnableGoCompleter( args ):
