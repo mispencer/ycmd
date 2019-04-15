@@ -688,7 +688,8 @@ def EnableCsCompleter( args ):
     package_path = p.join( version, url_file )
     if ( p.exists( package_path )
          and not CheckFileIntegrity( package_path, check_sum ) ):
-      PrintNoNewline( 'Cached Omnisharp file does not match checksum. Removing...' )
+      Print( 'Cached Omnisharp file does not match checksum.' )
+      PrintNoNewline( 'Removing...' )
       os.remove( package_path )
       Print( 'DONE' )
 
@@ -696,7 +697,8 @@ def EnableCsCompleter( args ):
     if p.exists( package_path ):
       Print( "Using cached Omnisharp: {}".format( url_file ) )
     else:
-      PrintNoNewline( "Downloading Omnisharp from {}...".format( download_url ) )
+      PrintNoNewline( "Downloading Omnisharp from {}...".format(
+                      download_url ) )
       DownloadFileTo( download_url, package_path )
       Print( 'DONE' )
 
