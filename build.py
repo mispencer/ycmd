@@ -648,12 +648,7 @@ def BuildRegexModule( cmake, cmake_common_args, script_args ):
 
 
 def EnableCsCompleter( args ):
-  def Print( *args2, **kwargs ):
-    if not args.quiet:
-      print( *args2, **kwargs )
-
-
-  def PrintNoNewline( text ):
+  def WriteStdout( text ):
     if not args.quiet:
       sys.stdout.write( text )
       sys.stdout.flush()
@@ -664,59 +659,31 @@ def EnableCsCompleter( args ):
 
   build_dir = p.join( DIR_OF_THIRD_PARTY, "omnisharp-roslyn" )
   try:
-    try:
-      os.mkdir( build_dir )
-    except OSError:
-      pass
+    MkDirIfMissing( build_dir )
     os.chdir( build_dir )
 
     download_data = GetCsCompleterDataForPlatform()
-    url_file = download_data[ 'file_name' ]
-    download_url = download_data[ 'download_url' ]
-    check_sum = download_data[ 'check_sum' ]
     version = download_data[ 'version' ]
 
-    Print( 'Installing Omnisharp {}'.format( version ) )
+    WriteStdout( "Installing Omnisharp {}\n".format( version ) )
 
     CleanCsCompleter( build_dir, version )
+    package_path = DownloadCsCompleter( WriteStdout, download_data )
+    ExtractCsCompleter( WriteStdout, build_dir, package_path )
 
-    try:
-      os.mkdir( version )
-    except OSError:
-      pass
-
-    package_path = p.join( version, url_file )
-    if ( p.exists( package_path )
-         and not CheckFileIntegrity( package_path, check_sum ) ):
-      Print( 'Cached Omnisharp file does not match checksum.' )
-      PrintNoNewline( 'Removing...' )
-      os.remove( package_path )
-      Print( 'DONE' )
-
-
-    if p.exists( package_path ):
-      Print( "Using cached Omnisharp: {}".format( url_file ) )
-    else:
-      PrintNoNewline( "Downloading Omnisharp from {}...".format(
-                      download_url ) )
-      DownloadFileTo( download_url, package_path )
-      Print( 'DONE' )
-
-    PrintNoNewline( 'Extracting Omnisharp to {}...'.format( build_dir ) )
-    if OnWindows():
-      with ZipFile( package_path, 'r' ) as package_zip:
-        package_zip.extractall()
-    else:
-      with tarfile.open( package_path ) as package_tar:
-        package_tar.extractall()
-    Print( 'DONE' )
-
-    Print( 'Done installing Omnisharp' )
+    WriteStdout( "Done installing Omnisharp\n" )
 
     if args.quiet:
       print( 'OK' )
   finally:
     os.chdir( DIR_OF_THIS_SCRIPT )
+
+
+def MkDirIfMissing( path ):
+  try:
+    os.mkdir( path )
+  except OSError:
+    pass
 
 
 def CleanCsCompleter( build_dir, version ):
@@ -729,6 +696,44 @@ def CleanCsCompleter( build_dir, version ):
     elif os.path.isdir( file_path ):
       import shutil
       shutil.rmtree( file_path )
+
+
+def DownloadCsCompleter( writeStdout, download_data ):
+  file_name = download_data[ 'file_name' ]
+  download_url = download_data[ 'download_url' ]
+  check_sum = download_data[ 'check_sum' ]
+  version = download_data[ 'version' ]
+
+  MkDirIfMissing( version )
+
+  package_path = p.join( version, file_name )
+  if ( p.exists( package_path )
+       and not CheckFileIntegrity( package_path, check_sum ) ):
+    writeStdout( "Cached Omnisharp file does not match checksum.\n" )
+    writeStdout( 'Removing...' )
+    os.remove( package_path )
+    writeStdout( 'DONE\n' )
+
+  if p.exists( package_path ):
+    writeStdout( "Using cached Omnisharp: {}\n".format( file_name ) )
+  else:
+    writeStdout( "Downloading Omnisharp from {}...".format(
+                    download_url ) )
+    DownloadFileTo( download_url, package_path )
+    writeStdout( 'DONE\n' )
+
+  return package_path
+
+
+def ExtractCsCompleter( writeStdout, build_dir, package_path ):
+  writeStdout( 'Extracting Omnisharp to {}...'.format( build_dir ) )
+  if OnWindows():
+    with ZipFile( package_path, 'r' ) as package_zip:
+      package_zip.extractall()
+  else:
+    with tarfile.open( package_path ) as package_tar:
+      package_tar.extractall()
+  writeStdout( 'DONE\n' )
 
 
 def GetCsCompleterDataForPlatform():
