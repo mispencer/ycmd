@@ -648,6 +648,20 @@ def BuildRegexModule( cmake, cmake_common_args, script_args ):
 
 
 def EnableCsCompleter( args ):
+  def Print( *args2, **kwargs ):
+    if not args.quiet:
+      print( *args2, **kwargs )
+
+
+  def PrintNoNewline( text ):
+    if not args.quiet:
+      sys.stdout.write( text )
+      sys.stdout.flush()
+
+  if args.quiet:
+    sys.stdout.write( 'Installing Omnisharp for C# support...' )
+    sys.stdout.flush()
+
   build_dir = p.join( DIR_OF_THIRD_PARTY, "omnisharp-roslyn" )
   try:
     try:
@@ -662,6 +676,8 @@ def EnableCsCompleter( args ):
     check_sum = download_data[ 'check_sum' ]
     version = download_data[ 'version' ]
 
+    Print( 'Installing Omnisharp {}'.format( version ) )
+
     CleanCsCompleter( build_dir, version )
 
     try:
@@ -672,18 +688,31 @@ def EnableCsCompleter( args ):
     package_path = p.join( version, url_file )
     if ( p.exists( package_path )
          and not CheckFileIntegrity( package_path, check_sum ) ):
-      print( 'Cached Omnisharp file does not match checksum. Removing...' )
+      PrintNoNewline( 'Cached Omnisharp file does not match checksum. Removing...' )
       os.remove( package_path )
+      Print( 'DONE' )
 
-    if not p.exists( package_path ):
+
+    if p.exists( package_path ):
+      Print( "Using cached Omnisharp: {}".format( url_file ) )
+    else:
+      PrintNoNewline( "Downloading Omnisharp from {}...".format( download_url ) )
       DownloadFileTo( download_url, package_path )
+      Print( 'DONE' )
 
+    PrintNoNewline( 'Extracting Omnisharp to {}...'.format( build_dir ) )
     if OnWindows():
       with ZipFile( package_path, 'r' ) as package_zip:
         package_zip.extractall()
     else:
       with tarfile.open( package_path ) as package_tar:
         package_tar.extractall()
+    Print( 'DONE' )
+
+    Print( 'Done installing Omnisharp' )
+
+    if args.quiet:
+      print( 'OK' )
   finally:
     os.chdir( DIR_OF_THIS_SCRIPT )
 
