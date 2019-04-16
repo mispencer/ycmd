@@ -11,4 +11,8 @@ if defined YCM_BENCHMARK (
   python benchmark.py --msvc %msvc%
 ) else (
   python run_tests.py --msvc %msvc%
+  python run_tests.py --msvc %msvc% --skip-build
+  python run_tests.py --msvc %msvc% --skip-build
+  python run_tests.py --msvc %msvc% --skip-build
+  python run_tests.py --msvc %msvc% --skip-build
 )
