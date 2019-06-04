@@ -1,4 +1,4 @@
-# Copyright (C) 2017-2018 ycmd contributors
+# Copyright (C) 2017-2019 ycmd contributors
 #
 # This file is part of ycmd.
 #
@@ -206,42 +206,11 @@ class JavaCompleter( language_server_completer.LanguageServerCompleter ):
     return [ 'java' ]
 
 
-  def GetSubcommandsMap( self ):
+  def GetCustomSubcommands( self ):
     return {
-      # Handled by base class
-      'GoToDeclaration': (
-        lambda self, request_data, args: self.GoToDeclaration( request_data )
-      ),
-      'GoTo': (
-        lambda self, request_data, args: self.GoToDeclaration( request_data )
-      ),
-      'GoToDefinition': (
-        lambda self, request_data, args: self.GoToDeclaration( request_data )
-      ),
-      'GoToReferences': (
-        lambda self, request_data, args: self.GoToReferences( request_data )
-      ),
       'FixIt': (
         lambda self, request_data, args: self.GetCodeActions( request_data,
                                                               args )
-      ),
-      'RefactorRename': (
-        lambda self, request_data, args: self.RefactorRename( request_data,
-                                                              args )
-      ),
-      'Format': (
-        lambda self, request_data, args: self.Format( request_data )
-      ),
-
-      # Handled by us
-      'RestartServer': (
-        lambda self, request_data, args: self._RestartServer( request_data )
-      ),
-      'StopServer': (
-        lambda self, request_data, args: self._StopServer()
-      ),
-      'OpenProject': (
-        lambda self, request_data, args: self._OpenProject( request_data, args )
       ),
       'GetDoc': (
         lambda self, request_data, args: self.GetDoc( request_data )
@@ -251,6 +220,12 @@ class JavaCompleter( language_server_completer.LanguageServerCompleter ):
       ),
       'OrganizeImports': (
         lambda self, request_data, args: self.OrganizeImports( request_data )
+      ),
+      'OpenProject': (
+        lambda self, request_data, args: self._OpenProject( request_data, args )
+      ),
+      'RestartServer': (
+        lambda self, request_data, args: self._RestartServer( request_data )
       ),
     }
 
@@ -289,10 +264,6 @@ class JavaCompleter( language_server_completer.LanguageServerCompleter ):
       ] )
 
 
-  def Shutdown( self ):
-    self._StopServer()
-
-
   def ServerIsHealthy( self ):
     return self._ServerIsRunning()
 
@@ -303,7 +274,7 @@ class JavaCompleter( language_server_completer.LanguageServerCompleter ):
              super( JavaCompleter, self ).ServerIsReady() )
 
 
-  def _GetProjectDirectory( self, *args, **kwargs ):
+  def GetProjectDirectory( self, *args, **kwargs ):
     return self._java_project_dir
 
 
@@ -313,7 +284,7 @@ class JavaCompleter( language_server_completer.LanguageServerCompleter ):
 
   def _RestartServer( self, request_data ):
     with self._server_state_mutex:
-      self._StopServer()
+      self.Shutdown()
       self._StartAndInitializeServer( request_data )
 
 
@@ -334,16 +305,15 @@ class JavaCompleter( language_server_completer.LanguageServerCompleter ):
         project_directory ) )
 
     with self._server_state_mutex:
-      self._StopServer()
+      self.Shutdown()
       self._StartAndInitializeServer( request_data,
                                       project_directory = project_directory )
 
 
   def _CleanUp( self ):
-    if not self._server_keep_logfiles:
-      if self._server_stderr:
-        utils.RemoveIfExists( self._server_stderr )
-        self._server_stderr = None
+    if not self._server_keep_logfiles and self._server_stderr:
+      utils.RemoveIfExists( self._server_stderr )
+      self._server_stderr = None
 
     if self._workspace_path and self._use_clean_workspace:
       try:
@@ -364,10 +334,6 @@ class JavaCompleter( language_server_completer.LanguageServerCompleter ):
     self._started_message_sent = False
 
     self.ServerReset()
-
-
-  def Language( self ):
-    return 'java'
 
 
   def StartServer( self, request_data, project_directory = None ):
@@ -420,7 +386,7 @@ class JavaCompleter( language_server_completer.LanguageServerCompleter ):
       except language_server_completer.LanguageServerConnectionTimeout:
         LOGGER.error( 'jdt.ls failed to start, or did not connect '
                       'successfully' )
-        self._StopServer()
+        self.Shutdown()
         return False
 
     LOGGER.info( 'jdt.ls Language Server started' )
@@ -428,7 +394,7 @@ class JavaCompleter( language_server_completer.LanguageServerCompleter ):
     return True
 
 
-  def _StopServer( self ):
+  def Shutdown( self ):
     with self._server_state_mutex:
       LOGGER.info( 'Shutting down jdt.ls...' )
 
@@ -485,9 +451,10 @@ class JavaCompleter( language_server_completer.LanguageServerCompleter ):
     # a compromise, we allow the user to force us to send the "query" to the
     # semantic engine, and thus get good completion results at the top level,
     # even if this means the "filtering and sorting" is not 100% ycmd flavor.
-    return ( request_data[ 'column_codepoint' ]
-             if request_data[ 'force_semantic' ]
-             else request_data[ 'start_codepoint' ] )
+    if request_data[ 'force_semantic' ]:
+      return request_data[ 'column_codepoint' ]
+    return super( JavaCompleter, self ).GetCodepointForCompletionRequest(
+      request_data )
 
 
   def HandleNotificationInPollThread( self, notification ):

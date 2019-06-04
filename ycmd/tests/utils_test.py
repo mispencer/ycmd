@@ -682,9 +682,7 @@ def ImportAndCheckCore_Missing_test():
 
 def ImportAndCheckCore_Python2_test():
   import_exception_messages = [
-    # Raised on Linux and OS X with Python 3.4.
-    'dynamic module does not define init function (PyInit_ycm_core).',
-    # Raised on Linux and OS X with Python 3.5.
+    # Raised on Linux and OS X.
     'dynamic module does not define module export function (PyInit_ycm_core).',
     # Raised on Windows.
     'Module use of python27.dll conflicts with this version of Python.'
@@ -704,7 +702,6 @@ def ImportAndCheckCore_Python3_test():
     # Raised on Linux and OS X.
     'dynamic module does not define init function (initycm_core).',
     # Raised on Windows.
-    'Module use of python34.dll conflicts with this version of Python.',
     'Module use of python35.dll conflicts with this version of Python.'
   ]
 
@@ -745,3 +742,17 @@ def GetClangResourceDir_NotFound_test( *args ):
     calling( utils.GetClangResourceDir ),
     raises( RuntimeError, 'Cannot find Clang resource directory' )
   )
+
+
+def MakeSafeFileNameString_test():
+  tests = (
+    ( 'this is a test 0123 -x', 'this_is_a_test_0123__x' ),
+    ( 'This Is A Test 0123 -x', 'this_is_a_test_0123__x' ),
+    ( 'T˙^ß ^ß å †´ß† 0123 -x', 't______________0123__x' ),
+    ( 'contains/slashes',       'contains_slashes' ),
+    ( 'contains/newline/\n',    'contains_newline__' ),
+    ( '',                       '' ),
+  )
+  for t in tests:
+    assert_that( utils.MakeSafeFileNameString( t[ 0 ] ),
+                 equal_to( t[ 1 ] ) )

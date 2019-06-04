@@ -46,7 +46,7 @@ int GetCodePointLength( uint8_t leading_byte ) {
 }
 
 
-const RawCodePoint FindCodePoint( const char *text ) {
+RawCodePoint FindCodePoint( const char *text ) {
 #include "UnicodeTable.inc"
 
   // Do a binary search on the array of code points to find the raw code point
@@ -91,7 +91,7 @@ CodePoint::CodePoint( const std::string &code_point )
 }
 
 
-CodePoint::CodePoint( const RawCodePoint &code_point )
+CodePoint::CodePoint( RawCodePoint&& code_point )
   : normal_( code_point.normal ),
     folded_case_( code_point.folded_case ),
     swapped_case_( code_point.swapped_case ),

@@ -249,7 +249,7 @@ def Initialize( request_id, project_directory, settings ):
         'completion': {
           'completionItemKind': {
             # ITEM_KIND list is 1-based.
-            'valueSet': list( range( 1, len( ITEM_KIND ) + 1 ) ),
+            'valueSet': list( range( 1, len( ITEM_KIND ) ) ),
           }
         }
       }
@@ -344,6 +344,25 @@ def Hover( request_id, request_data ):
 def Definition( request_id, request_data ):
   return BuildRequest( request_id,
                        'textDocument/definition',
+                       BuildTextDocumentPositionParams( request_data ) )
+
+
+def Declaration( request_id, request_data ):
+  return BuildRequest( request_id,
+                       'textDocument/declaration',
+                       BuildTextDocumentPositionParams( request_data ) )
+
+
+def TypeDefinition( request_id, request_data ):
+  return BuildRequest( request_id,
+                       'textDocument/typeDefinition',
+                       BuildTextDocumentPositionParams( request_data ) )
+
+
+
+def Implementation( request_id, request_data ):
+  return BuildRequest( request_id,
+                       'textDocument/implementation',
                        BuildTextDocumentPositionParams( request_data ) )
 
 

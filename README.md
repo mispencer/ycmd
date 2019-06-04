@@ -1,9 +1,7 @@
 ycmd: a code-completion & comprehension server
 ==============================================
 
-[![Linux build status](https://img.shields.io/travis/Valloric/ycmd/master.svg?label=Linux)](https://travis-ci.org/Valloric/ycmd)
-[![macOS build status](https://img.shields.io/circleci/project/github/Valloric/ycmd/master.svg?label=macOS)](https://circleci.com/gh/Valloric/ycmd)
-[![Windows build status](https://img.shields.io/appveyor/ci/Valloric/ycmd/master.svg?label=Windows)](https://ci.appveyor.com/project/Valloric/ycmd)
+[![Build status](https://dev.azure.com/YouCompleteMe/YCM/_apis/build/status/Valloric.ycmd?branchName=master)](https://dev.azure.com/YouCompleteMe/YCM/_build/latest?definitionId=2&branchName=master)
 [![Coverage status](https://img.shields.io/codecov/c/github/Valloric/ycmd/master.svg)](https://codecov.io/gh/Valloric/ycmd)
 
 ycmd is a server that provides APIs for code-completion and other
@@ -41,7 +39,7 @@ tests][test-setup].**
 
 This is all for Ubuntu Linux. Details on getting ycmd running on other OS's can
 be found in [YCM's instructions][ycm-install] (ignore the Vim-specific parts).
-Note that **ycmd runs on Python 2.7.1+ and 3.4+.**
+Note that **ycmd runs on Python 2.7.1+ and 3.5.1+.**
 
 First, install the minimal dependencies:
 ```
@@ -52,7 +50,6 @@ Next, install the language specific dependencies you need:
 - `sudo apt install golang-go` for Go.
 - `sudo apt install npm` for JavaScript and TypeScript.
 - `sudo apt install mono-devel` for C#.
-- install Cargo and rustc with [rustup][] for Rust.
 - `sudo apt install openjdk-8-jre` for Java.
 
 When you first clone the repository you'll need to update the submodules:
@@ -105,8 +102,9 @@ support is currently **experimental** and changes in the near future might break
 backwards compatibility. There's also a Jedi-based completer for semantic
 completion for Python, an OmniSharp-based completer for C#, a
 [Gocode][gocode]-based completer for Go (using [Godef][godef] for jumping to
-definitions), a TSServer-based completer for JavaScript and TypeScript, and a
-[jdt.ls][jdtls]-based server for Java. More will be added with time.
+definitions), a TSServer-based completer for JavaScript and TypeScript, a
+[jdt.ls][jdtls]-based server for Java, and a [RLS][]-based completer for Rust.
+More will be added with time.
 
 There are also other completion engines, like the filepath completer (part of
 the identifier completer).
@@ -395,7 +393,7 @@ License
 -------
 
 This software is licensed under the [GPL v3 license][gpl].
-© 2015-2018 ycmd contributors
+© 2015-2019 ycmd contributors
 
 [ycmd-users]: https://groups.google.com/forum/?hl=en#!forum/ycmd-users
 [ycm]: http://valloric.github.io/YouCompleteMe/
@@ -430,5 +428,5 @@ This software is licensed under the [GPL v3 license][gpl].
 [jdtls]: https://github.com/eclipse/eclipse.jdt.ls
 [api-docs]: https://valloric.github.io/ycmd/
 [ycmd-extra-conf]: https://github.com/Valloric/ycmd/blob/master/.ycm_extra_conf.py
-[rustup]: https://www.rustup.rs/
 [clangd]: https://clang.llvm.org/extra/clangd.html
+[RLS]: https://github.com/rust-lang-nursery/rls

@@ -37,6 +37,7 @@ python_path = [
           'regex_{}'.format( sys.version_info[ 0 ] ) ),
   p.join( DIR_OF_THIRD_PARTY, 'frozendict' ),
   p.join( DIR_OF_THIRD_PARTY, 'jedi_deps', 'jedi' ),
+  p.join( DIR_OF_THIRD_PARTY, 'jedi_deps', 'numpydoc' ),
   p.join( DIR_OF_THIRD_PARTY, 'jedi_deps', 'parso' ),
   p.join( DIR_OF_THIRD_PARTY, 'requests_deps', 'certifi' ),
   p.join( DIR_OF_THIRD_PARTY, 'requests_deps', 'chardet' ),
@@ -65,16 +66,25 @@ def RunFlake8():
   subprocess.check_call( args )
 
 
+# Newer completers follow a standard convention of:
+#  - build: --<completer>-completer
+#  - test directory: ycmd/tests/<completer>
+#  - no aliases.
+SIMPLE_COMPLETERS = [
+  'clangd',
+  'rust',
+  'go',
+]
+
+# More complex or legacy cases can specify all of:
+#  - build: flags to add to build.py to include this completer
+#  - test: flags to add to run_tests.py when _not_ testing this completer
+#  - aliases?: list of completer aliases for the --completers option
 COMPLETERS = {
   'cfamily': {
     'build': [ '--clang-completer' ],
     'test': [ '--exclude-dir=ycmd/tests/clang' ],
     'aliases': [ 'c', 'cpp', 'c++', 'objc', 'clang', ]
-  },
-  'clangd': {
-    'build': [ '--clangd-completer' ],
-    'test': [ '--exclude-dir=ycmd/tests/clangd' ],
-    'aliases': []
   },
   'cs': {
     'build': [ '--cs-completer' ],
@@ -85,16 +95,6 @@ COMPLETERS = {
     'build': [ '--js-completer' ],
     'test': [ '--exclude-dir=ycmd/tests/tern' ],
     'aliases': [ 'js', 'tern' ]
-  },
-  'go': {
-    'build': [ '--go-completer' ],
-    'test': [ '--exclude-dir=ycmd/tests/go' ],
-    'aliases': [ 'gocode' ]
-  },
-  'rust': {
-    'build': [ '--rust-completer' ],
-    'test': [ '--exclude-dir=ycmd/tests/rust' ],
-    'aliases': [ 'racer', 'racerd', ]
   },
   'typescript': {
     'build': [ '--ts-completer' ],
@@ -113,6 +113,13 @@ COMPLETERS = {
     'aliases': [ 'jdt' ],
   },
 }
+
+# Add in the simple completers
+for completer in SIMPLE_COMPLETERS:
+  COMPLETERS[ completer ] = {
+    'build': [ '--{}-completer'.format( completer ) ],
+    'test': [ '--exclude-dir=ycmd/tests/{}'.format( completer ) ],
+  }
 
 
 def CompleterType( value ):
@@ -145,8 +152,8 @@ def ParseArguments():
                         COMPLETERS.keys() ) )
   parser.add_argument( '--skip-build', action = 'store_true',
                        help = 'Do not build ycmd before testing.' )
-  parser.add_argument( '--msvc', type = int, choices = [ 14, 15 ],
-                       default = 15, help = 'Choose the Microsoft Visual '
+  parser.add_argument( '--msvc', type = int, choices = [ 14, 15, 16 ],
+                       default = 16, help = 'Choose the Microsoft Visual '
                        'Studio version (default: %(default)s).' )
   parser.add_argument( '--coverage', action = 'store_true',
                        help = 'Enable coverage report (requires coverage pkg)' )
@@ -157,6 +164,9 @@ def ParseArguments():
                               'manually, then exit.' )
   parser.add_argument( '--no-retry', action = 'store_true',
                        help = 'Disable retry of flaky tests' )
+  parser.add_argument( '--quiet', action = 'store_true',
+                       help = 'Quiet installation mode. Just print overall '
+                              'progress and errors' )
 
   parsed_args, nosetests_args = parser.parse_known_args()
 
@@ -198,8 +208,7 @@ def BuildYcmdLibs( args ):
     build_cmd = [
       sys.executable,
       p.join( DIR_OF_THIS_SCRIPT, 'build.py' ),
-      '--core-tests',
-      '--quiet',
+      '--core-tests'
     ]
 
     for key in COMPLETERS:
@@ -215,6 +224,9 @@ def BuildYcmdLibs( args ):
       # output in a known directory, which is then used by the CI infrastructure
       # to generate the c++ coverage information.
       build_cmd.extend( [ '--enable-coverage', '--build-dir', '.build' ] )
+
+    if args.quiet:
+      build_cmd.append( '--quiet' )
 
     subprocess.check_call( build_cmd )
 
