@@ -161,6 +161,9 @@ class CsharpCompleter( Completer ):
          self._SolutionSubcommand( request_data,
                                    method = '_GoToImplementation',
                                    fallback_to_declaration = True ) ),
+      'GoToReferences'               : ( lambda self, request_data, args:
+         self._SolutionSubcommand( request_data,
+                                   method = '_GoToReferences' ) ),
       'GetType'                          : ( lambda self, request_data, args:
          self._SolutionSubcommand( request_data,
                                    method = '_GetType' ) ),
@@ -518,6 +521,37 @@ class CsharpSolutionCompleter( object ):
         raise RuntimeError( 'Can\'t jump to implementation' )
       else:
         raise RuntimeError( 'No implementations found' )
+
+
+  def _GoToReferences( self, request_data ):
+    """ Jump to references of identifier under cursor """
+    try:
+      reference = self._GetResponse(
+          '/findusages',
+          self._DefaultParameters( request_data ) )
+    except ValueError:
+      reference = { 'QuickFixes': None }
+
+    if reference[ 'QuickFixes' ]:
+      if len( reference[ 'QuickFixes' ] ) == 1:
+        return responses.BuildGoToResponseFromLocation(
+          _BuildLocation(
+            request_data,
+            reference[ 'QuickFixes' ][ 0 ][ 'FileName' ],
+            reference[ 'QuickFixes' ][ 0 ][ 'Line' ],
+            reference[ 'QuickFixes' ][ 0 ][ 'Column' ] ) )
+      else:
+        return [ responses.BuildGoToResponseFromLocation(
+                   _BuildLocation( request_data,
+                                   x[ 'FileName' ],
+                                   x[ 'Line' ],
+                                   x[ 'Column' ] ) )
+                 for x in reference[ 'QuickFixes' ] ]
+    else:
+      if reference[ 'QuickFixes' ] is None:
+        raise RuntimeError( 'Can\'t jump to reference' )
+      else:
+        raise RuntimeError( 'No references found' )
 
 
   def _GetType( self, request_data ):
