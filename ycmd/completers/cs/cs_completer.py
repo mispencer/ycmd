@@ -364,7 +364,7 @@ class CsharpSolutionCompleter( object ):
            and PATH_TO_ROSLYN_OMNISHARP_BINARY.endswith( '.exe' ) ):
         command.insert( 0, 'mono' )
 
-      LOGGER.info( 'Starting OmniSharp server with: ' + str( command ) )
+      LOGGER.info( 'Starting OmniSharp server with: %s', command )
 
       solutionfile = os.path.basename( self._solution_path )
       self._filename_stdout = utils.CreateLogfile(
@@ -615,9 +615,7 @@ class CsharpSolutionCompleter( object ):
   def _GetResponse( self, handler, parameters = {}, timeout = None ):
     """ Handle communication with server """
     target = urljoin( self._ServerLocation(), handler )
-    LOGGER.info( u'Sending request' )
     response = requests.post( target, json = parameters, timeout = timeout )
-    LOGGER.info( u'Received response' )
     return response.json()
 
 
